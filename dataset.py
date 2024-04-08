@@ -127,11 +127,12 @@ class PokemonDataset(Dataset):
 
         img = self.transforms(img)
 
-        return img, row.class_id, row.class_counts
+        return img, int(row.class_id), int(row.class_counts)
 
 
 if __name__ == "__main__":
 
     # DataDownloader.create_zip()
 
-    dataset = PokemonDataset("val", 12, True)
+    dataset = PokemonDataset("val", 12, )
+    print(dataset[0])
