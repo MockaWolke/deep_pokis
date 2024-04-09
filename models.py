@@ -62,7 +62,7 @@ class ExampleMlp(ModelTemplate):
         super().__init__(include_crops, num_classes, *args, **kwargs)
 
         self.imgsz = imgsz
-        self.pool_factor = 4
+        self.pool_factor = 1
         self.pool = nn.MaxPool2d(self.pool_factor)
         self.lin1 = nn.Linear(
             (
@@ -153,9 +153,16 @@ class LightningWrapper(LightningModule):
         
     def training_step(self, data, index):
         
-        x, y, class_counts = data
+        if len(data)== 2:
+            x, y = data
         
-        pred = self.forward(x, y, class_counts)
+            pred = self.forward(x, y,)
+            
+        elif len(data) ==3:
+            x, y, class_counts = data
+            pred = self.forward(x, y, class_counts)
+            
+        
         
         loss = self.loss_func(pred, y)
         
@@ -171,7 +178,14 @@ class LightningWrapper(LightningModule):
 
     def validation_step(self, data, index):
         
-        x, y, class_counts = data
+        if len(data)== 2:
+            x, y = data
+        
+            pred = self.forward(x, y,)
+            
+        elif len(data) ==3:
+            x, y, class_counts = data
+            pred = self.forward(x, y, class_counts)
         
         pred = self.forward(x)
         
