@@ -6,7 +6,7 @@ import pandas as pd
 import torchvision
 import torch
 import numpy as np
-import gdown
+import matplotlib.pyplot as plt
 
 class DataDownloader:
 
@@ -19,7 +19,7 @@ class DataDownloader:
     ]
 
     prefix = "data"
-    share_path = "https://drive.google.com/file/d/1Q8vhyv5fIwvvhq_eH0B2M1xh1ynenrEE/view?usp=sharing"
+    share_path = "https://drive.google.com/file/d/1IGX5we-xkP3mzk7cGkB7LNXaY1kvl3w0/view?usp=sharing"
 
     @classmethod
     def get_paths(cls):
@@ -27,6 +27,7 @@ class DataDownloader:
 
     @classmethod
     def download(cls):
+        import gdown
         
         print("Downloading Dataset")
         os.makedirs(cls.prefix, exist_ok=True)
@@ -89,7 +90,9 @@ class PokemonDataset(Dataset):
 
         if mode not in ["train", "val", "test"]:
             raise ValueError()
+        
 
+        self.mode = mode
         self.include_crops = include_crops
         self.transforms = transforms
         self.imgsz = imgsz
@@ -104,10 +107,81 @@ class PokemonDataset(Dataset):
         )
 
         self.resize = torchvision.transforms.Resize((imgsz, imgsz))
+        
+        self.num_classes = len(self.df.class_id.dropna().unique())
 
     def __len__(self):
 
         return len(self.df)
+    
+    def plot_examples(self, n = 4):
+        
+        fig = plt.figure(figsize=(6,6))
+        
+        for x in range(n):
+            for y in range(n):
+                index = x + 4* y +1
+                plt.subplot(n ,n ,index)
+                
+                row = self.df.sample(1).iloc[0]
+                
+                plt.imshow(plt.imread(row.path))
+                
+                plt.axis("off")
+                
+                plt.title(f"{row.main_type} - {int(row.class_id)}")
+        plt.tight_layout()
+        plt.show()
+            
+    def plot_examples_crops(self, n = 4):
+        
+        fig = plt.figure(figsize=(6,6))
+        
+        for x in range(n):
+            for y in range(n):
+                index = x + 4* y +1
+                plt.subplot(n ,n ,index)
+                
+                row = self.df.query("cropp_exists").sample(1).iloc[0]
+                
+                plt.imshow(plt.imread(row.cropped_path))
+                
+                plt.axis("off")
+                
+                plt.title(f"{row.main_type} - {int(row.class_id)}")
+        plt.tight_layout()
+        plt.show()
+            
+    def plot_examples_both(self,):
+        
+        fig = plt.figure(figsize=(6,6))
+        row = self.df.query("cropp_exists").sample(1).iloc[0]
+        plt.subplot(2 ,2 ,1)
+        plt.imshow(plt.imread(row.path))
+        plt.axis("off")
+        
+        plt.subplot(2 ,2 ,2)
+        plt.axis("off")
+        plt.title(f"{row.main_type} - {int(row.class_id)}")
+        plt.imshow(plt.imread(row.cropped_path))
+        plt.axis("off")
+        
+        row = self.df.query("cropp_exists").sample(1).iloc[0]
+        plt.subplot(2 ,2 ,3)
+        plt.imshow(plt.imread(row.path))
+        plt.axis("off")
+        
+        plt.subplot(2 ,2 ,4)
+        plt.imshow(plt.imread(row.cropped_path))
+        plt.axis("off")
+        plt.imshow(plt.imread(row.cropped_path))
+                
+        plt.tight_layout()
+        plt.show()
+            
+
+
+
 
     def __getitem__(self, index) -> tuple[torch.TensorType, int, int]:
 
@@ -125,14 +199,22 @@ class PokemonDataset(Dataset):
             
             img = torch.cat((img, crop), 0)
 
-        img = self.transforms(img)
 
+
+        img = self.transforms(img)
+        
+        img = (img.float() / 128) - 1
+        
+        if self.mode == "test":
+            return img
+        
+        
         return img, int(row.class_id), int(row.class_counts)
 
 
 if __name__ == "__main__":
 
     # DataDownloader.create_zip()
-
-    dataset = PokemonDataset("val", 12, )
-    print(dataset[0])
+    DataDownloader.create_zip()
+    # dataset = PokemonDataset("val", 12, )
+    # print(dataset[0])

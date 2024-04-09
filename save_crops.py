@@ -10,7 +10,7 @@ from glob import glob
 
 CROP_FACTOR = 2.0
 
-model = YOLO('best.pt')  
+model = YOLO('last.pt')  
 
 
 
