@@ -136,12 +136,12 @@ class LightningWrapper(LightningModule):
         self.num_classes = self.model.num_classes
         
         
-        self.metrics = {
+        self.metrics = nn.ModuleDict({
             "acc":torchmetrics.Accuracy(task="multiclass", num_classes = self.num_classes),
             "f1_score" : torchmetrics.F1Score(task="multiclass", num_classes = self.num_classes),
             "precision": torchmetrics.Precision(task="multiclass", num_classes = self.num_classes),
             "recall" : torchmetrics.Recall(task="multiclass", num_classes = self.num_classes),
-            }
+            })
         self.loss_metric = torchmetrics.MeanMetric()
         
         self.loss_func = nn.CrossEntropyLoss()
@@ -165,7 +165,7 @@ class LightningWrapper(LightningModule):
         for name, metric in self.metrics.items():
             
             value = metric(pred, y)
-            self.log(name, value, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log(name, value, on_step= name == "acc", on_epoch=True, prog_bar=True, logger=True)
 
         return loss
 
