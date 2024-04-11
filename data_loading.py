@@ -7,89 +7,32 @@ import torchvision
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+from datadownloader import DataDownloader
+import torchvision.transforms.v2 as T
 
-
-class DataDownloader:
-
-    needed_paths = [
-        "info.csv",
-        "train_cropped",
-        "train",
-        "test_cropped",
-        "test",
-    ]
-
-    prefix = "data"
-    share_path = "https://drive.google.com/file/d/1IGX5we-xkP3mzk7cGkB7LNXaY1kvl3w0/view?usp=sharing"
-
-    @classmethod
-    def get_paths(cls):
-        return [os.path.join(cls.prefix, p) for p in cls.needed_paths]
-
-    @classmethod
-    def download(cls):
-        import gdown
-
-        print("Downloading Dataset")
-        os.makedirs(cls.prefix, exist_ok=True)
-
-        output_path = os.path.join(cls.prefix, "dataset.zip")
-        gdown.download(url=cls.share_path, output=output_path, quiet=False, fuzzy=True)
-
-        with zipfile.ZipFile(output_path, "r") as zip_ref:
-            zip_ref.extractall(cls.prefix)
-
-        os.remove(output_path)
-
-    @classmethod
-    def get_info_csv(cls):
-        return pd.read_csv(
-            os.path.join(
-                cls.prefix,
-                "info.csv",
-            ),
-            index_col=0,
-        )
-
-    @classmethod
-    def complete(cls):
-
-        for path in cls.get_paths():
-            if not os.path.exists(path):
-                return False
-
-        return True
-
-    @classmethod
-    def create_zip(cls):
-
-        assert cls.complete()
-
-        zip_path = os.path.join(cls.prefix, "pokemon_dataset.zip")
-        with zipfile.ZipFile(zip_path, "w") as zipf:
-            for path in cls.get_paths():
-                if os.path.isdir(path):
-                    for root, dirs, files in os.walk(path):
-                        for file in files:
-                            zipf.write(
-                                os.path.join(root, file),
-                                os.path.relpath(
-                                    os.path.join(root, file), os.path.join(path, "..")
-                                ),
-                            )
-                else:
-                    zipf.write(path, os.path.basename(path))
-        # crate pokemon_dataset.zip with all files
-
+to_float = T.Compose([
+    T.ToDtype(torch.float32),
+    T.Normalize(mean=(0,)*3, std=(255,)*3)
+])
 
 class PokemonDataset(Dataset):
 
     def __init__(
-        self, mode, crop_mode: str = "both", transforms=lambda x: x, imgsz=256
+        self,
+        mode,
+        crop_mode: str = "both",
+        synth_frac=1.0,
+        transforms= to_float,
+        imgsz=256,
     ) -> None:
         super().__init__()
 
-        if mode not in ["train", "val", "test"]:
+        if mode not in [
+            "train",
+            "val",
+            "test",
+        ]:
             raise ValueError()
 
         if crop_mode not in ["img", "both", "crop"]:
@@ -105,11 +48,20 @@ class PokemonDataset(Dataset):
 
         assert DataDownloader.complete(), "Data is missing"
 
-        self.df: pd.DataFrame = (
-            DataDownloader.get_info_csv().query("ds_type == @mode").copy()
+        orig_df = DataDownloader.get_info_csv()
+
+        self.df: pd.DataFrame = orig_df.query("ds_type == @mode").copy()
+
+        aug_string = f"aug_{mode}"
+
+        self.df = pd.concat(
+            (
+                self.df,
+                orig_df.query("ds_type == @aug_string").copy().sample(frac=synth_frac),
+            )
         )
 
-        self.resize = torchvision.transforms.Resize((imgsz, imgsz), antialias = True)
+        self.resize = torchvision.transforms.Resize((imgsz, imgsz), antialias=True)
 
         self.num_classes = len(self.df.class_id.dropna().unique())
 
@@ -191,6 +143,8 @@ class PokemonDataset(Dataset):
         if self.crop_mode == "img":
 
             img = self.resize(torchvision.io.read_image(row.path))
+            img = self.transforms(img)
+
 
         elif self.crop_mode == "crop":
 
@@ -199,21 +153,24 @@ class PokemonDataset(Dataset):
                 if row.cropp_exists
                 else self.resize(torchvision.io.read_image(row.path))
             )
+            img = self.transforms(img)
+            
 
         elif self.crop_mode == "both":
 
             img = self.resize(torchvision.io.read_image(row.path))
+            img = self.transforms(img)
+            
             crop = (
                 self.resize(torchvision.io.read_image(row.cropped_path))
                 if row.cropp_exists
                 else torch.zeros_like(img)
             )
+            crop = self.transforms(crop)
+            
 
             img = torch.cat((img, crop), 0)
 
-        img = img.float() / 255
-
-        img = self.transforms(img)
 
         if self.mode == "test":
             return img

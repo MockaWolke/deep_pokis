@@ -62,7 +62,7 @@ class ExampleMlp(ModelTemplate):
         super().__init__(include_crops, num_classes, *args, **kwargs)
 
         self.imgsz = imgsz
-        self.pool_factor = 1
+        self.pool_factor = 2
         self.pool = nn.MaxPool2d(self.pool_factor)
         self.lin1 = nn.Linear(
             (
@@ -74,14 +74,16 @@ class ExampleMlp(ModelTemplate):
         )
         self.flatten = nn.Flatten()
         self.lin2 = nn.Linear(64, 256)
-        self.lin3 = nn.Linear(256, self.num_classes)
+        self.lin3 = nn.Linear(256, 256)
+        self.lin4 = nn.Linear(256, self.num_classes)
 
     def forward(self, x, label=None, label_count=None):
 
         x = self.flatten(self.pool(x))
         x = nn.functional.relu(self.lin1(x))
         x = nn.functional.relu(self.lin2(x))
-        return self.lin3(x)
+        x = nn.functional.relu(self.lin3(x))
+        return self.lin4(x)
 
         
 class TimmModel(ModelTemplate):
@@ -99,6 +101,7 @@ class TimmModel(ModelTemplate):
             in_chans=6 if include_crops else 3,
             features_only=True,
             out_indices=(-1,),
+            
         )
         self.dropout = nn.Dropout(dropout)
 
