@@ -177,6 +177,35 @@ class PokemonDataset(Dataset):
 
         return img, int(row.class_id), int(row.class_counts)
 
+    def viz_transorms(self, img_index = None, crop = True):
+        
+        if img_index is None:
+            img_index = np.random.choice(len(self.df))
+            
+        row = self.df.iloc[img_index]
+        
+        if crop:
+
+            img = (
+                self.resize(torchvision.io.read_image(row.cropped_path))
+                if row.cropp_exists
+                else self.resize(torchvision.io.read_image(row.path))
+            )
+            
+        else:
+
+            img = self.resize(torchvision.io.read_image(row.path))
+        
+        imgs = [self.transforms(img) for _ in range(16)]
+        
+        fig, axes = plt.subplots(4, 4, figsize=(4, 4))
+        for i, ax in enumerate(axes.flat):
+            img = imgs[i].clamp(0, 1).permute(1, 2, 0).numpy() 
+            ax.imshow(img)  
+            ax.axis('off')
+        plt.tight_layout()
+        plt.show()
+            
 
 if __name__ == "__main__":
 
