@@ -8,5 +8,6 @@ timm
 torch
 torchvision>=0.16
 tqdm
+pytorch-metric-learning
 lightning
 wandb

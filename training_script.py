@@ -1,6 +1,5 @@
 from models import ModelTemplate, LightningWrapper, TimmModel
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from data_loading import PokemonDataset
 import os
 from lightning import Trainer
@@ -9,12 +8,12 @@ import timm
 from lightning.pytorch.loggers import WandbLogger
 from torch import nn
 import torch
-import torchvision.transforms.v2 as transforms
 import argparse
 from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import io
+from train_utils import gen_transforms, gen_cos_anneal_warmup
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from PIL import Image
 
@@ -40,6 +39,14 @@ parser.add_argument(
 parser.add_argument("--cat_model", type=int, default=0)
 parser.add_argument("--n_pred_imgs", type=int, default=10)
 parser.add_argument("--stop_patience", type=int, default=None)
+parser.add_argument("--lr", type=float, default=1e-3)
+parser.add_argument("--use_scheduler", action="store_true")
+parser.add_argument("--warmup_steps", type=int, default=2)
+parser.add_argument("--min_lr", type=float, default=1e-6)
+
+parser.add_argument(
+    "--transform_strength", type=str, choices=["mild", "medium", "strong"]
+)
 
 
 args = parser.parse_args()
@@ -48,16 +55,7 @@ if args.name is None:
     args.name = f"{args.backbone}_{args.crop_mode}_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
 
 
-transform_pipeline = transforms.Compose(
-    [
-        transforms.ToDtype(torch.float32),
-        transforms.Normalize(mean=(0,) * 3, std=(255,) * 3),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(p=0.5),  # 50% chance of vertical flip
-        transforms.RandomRotation(degrees=10),
-        transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0)),
-    ]
-)
+transform_pipeline = gen_transforms(args.transform_strength)
 
 
 train_dataset = PokemonDataset(
@@ -171,19 +169,46 @@ if args.stop_patience:
             verbose=True,
         )
     )
-    
+
 checkpoint_callback = ModelCheckpoint(
-    monitor='val_acc',
-    dirpath='checkpoints/',
-    filename='best-checkpoint',
+    monitor="val_acc",
+    dirpath="checkpoints/",
+    filename="best-checkpoint",
     save_top_k=1,
-    mode='max',
+    mode="max",
 )
 callbacks.append(checkpoint_callback)
 
 
+if args.use_scheduler == False:
 
-wrapper = LightningWrapper(model, metric_average="micro")
+    def optim_setup(wrapper):
+
+        wrapper.optim = torch.optim.Adam(wrapper.parameters(), args.lr)
+
+        return {
+            "optimizer": wrapper.optim,
+        }
+
+else:
+
+    def optim_setup(wrapper):
+
+        wrapper.optim = torch.optim.Adam(wrapper.parameters(), args.lr)
+        wrapper.sheduler = gen_cos_anneal_warmup(
+            wrapper.optim,
+            warmup_steps=args.warmup_steps,
+            anneal_steps=max(args.epochs - args.warmup_steps, 1),
+            min_cos_lr=args.min_lr,
+        )
+
+        return {
+            "optimizer": wrapper.optim,
+        }
+
+
+
+wrapper = LightningWrapper(model, metric_average="micro", optim_setup=optim_setup)
 trainer = Trainer(
     devices="auto", max_epochs=args.epochs, logger=wandb_logger, callbacks=callbacks
 )

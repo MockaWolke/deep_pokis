@@ -133,10 +133,18 @@ class TimmModel(ModelTemplate):
 
         return self.head(x)
 
+def standard_addam_func(wrapper):
+    
+
+    wrapper.optim = torch.optim.Adam(wrapper.parameters(), 1e-3)
+
+    return {
+        "optimizer": wrapper.optim,
+    }
 
 class LightningWrapper(LightningModule):
 
-    def __init__(self, model, metric_average="micro") -> None:
+    def __init__(self, model, metric_average="micro", optim_setup = standard_addam_func):
         super().__init__()
 
         self.model = model
@@ -185,7 +193,7 @@ class LightningWrapper(LightningModule):
                 ),
             }
         )
-
+        self.optim_setup = optim_setup
 
         self.id2class = {int(i): v for i, v in DataDownloader.get_id2class().items()}
 
@@ -273,15 +281,9 @@ class LightningWrapper(LightningModule):
         if len(data) == 2:
             x, y = data
 
-            pred = self.forward(
-                x,
-                y,
-            )
-
         elif len(data) == 3:
             x, y, class_counts = data
-            pred = self.forward(x, y, class_counts)
-
+            
         pred = self.forward(x)
 
         for metric in self.test_metrics.values():
@@ -302,10 +304,8 @@ class LightningWrapper(LightningModule):
             
         
 
-    def configure_optimizers(self, lr=1e-3, sheduler_kwgs={"tmax"}):
+    def configure_optimizers(self,):
 
-        self.optim = torch.optim.Adam(self.parameters(), 1e-3)
 
-        return {
-            "optimizer": self.optim,
-        }
+        return self.optim_setup(self)
+
