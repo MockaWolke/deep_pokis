@@ -130,10 +130,12 @@ class TimmModel(ModelTemplate):
 
 class LightningWrapper(LightningModule):
     
-    def __init__(self, model,) -> None:
+    def __init__(self, model, optim, scheduler = None) -> None:
         super().__init__()
         
         self.model = model
+        self.optim = optim
+        self.scheduler = scheduler
         
 
         self.num_classes = self.model.num_classes
@@ -162,9 +164,8 @@ class LightningWrapper(LightningModule):
             pred = self.forward(x, y,)
             
         elif len(data) ==3:
-            x, y, class_counts = data
+            x, y, class_counts = data            
             pred = self.forward(x, y, class_counts)
-            
         
         
         loss = self.loss_func(pred, y)
@@ -206,12 +207,15 @@ class LightningWrapper(LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+        
+        if self.scheduler is None:
+            
+            return {"optimizer": self.optim}
+        
         return {
-            'optimizer': optimizer,
+            'optimizer': self.optim,
             'lr_scheduler': {
-                'scheduler': lr_scheduler,
+                'scheduler': self.scheduler,
                 'monitor': 'val_loss',  # Optional: specify what metric to monitor
             }
         }
