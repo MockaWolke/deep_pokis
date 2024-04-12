@@ -130,13 +130,10 @@ class TimmModel(ModelTemplate):
 
 class LightningWrapper(LightningModule):
     
-    def __init__(self, model, optim, scheduler = None, metric_average = "macro") -> None:
+    def __init__(self, model, metric_average = "macro") -> None:
         super().__init__()
         
         self.model = model
-        self.optim = optim
-        self.scheduler = scheduler
-        
 
         self.num_classes = self.model.num_classes
         
@@ -206,19 +203,16 @@ class LightningWrapper(LightningModule):
 
 
 
-    def configure_optimizers(self):
+    def configure_optimizers(self, lr = 1e-3, sheduler_kwgs = {"tmax"}):
         
-        if self.scheduler is None:
-            
-            return {"optimizer": self.optim}
-        
+        self.optim = torch.optim.Adam(self.parameters(),1e-3)
+     
         return {
-            'optimizer': self.optim,
-            'lr_scheduler': {
-                'scheduler': self.scheduler,
-                'monitor': 'val_loss',  # Optional: specify what metric to monitor
+                'optimizer': self.optim,
+            
             }
-        }
         
         
-        
+
+
+            

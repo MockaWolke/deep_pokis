@@ -4,8 +4,9 @@ numpy
 opencv_python
 pandas
 pillow
+timm
 torch
-torchvision
+torchvision>=0.16
 tqdm
 lightning
 wandb
