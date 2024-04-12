@@ -83,13 +83,13 @@ class DataDownloader:
     @classmethod 
     def get_class2id(cls):
         
-        with open("class2id.json") as f:
+        with open("data/class2id.json") as f:
             return json.load(f)
         
     @classmethod 
     def get_id2class(cls):
         
-        with open("id2class.json") as f:
+        with open("data/id2class.json") as f:
             return json.load(f)
 
 if __name__ == "__main__":
