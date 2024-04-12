@@ -130,7 +130,7 @@ class TimmModel(ModelTemplate):
 
 class LightningWrapper(LightningModule):
     
-    def __init__(self, model, optim, scheduler = None) -> None:
+    def __init__(self, model, optim, scheduler = None, metric_average = "macro") -> None:
         super().__init__()
         
         self.model = model
@@ -143,9 +143,9 @@ class LightningWrapper(LightningModule):
         
         self.metrics = nn.ModuleDict({
             "acc":torchmetrics.Accuracy(task="multiclass", num_classes = self.num_classes),
-            "f1_score" : torchmetrics.F1Score(task="multiclass", num_classes = self.num_classes),
-            "precision": torchmetrics.Precision(task="multiclass", num_classes = self.num_classes),
-            "recall" : torchmetrics.Recall(task="multiclass", num_classes = self.num_classes),
+            "f1_score" : torchmetrics.F1Score(task="multiclass", num_classes = self.num_classes, average = metric_average),
+            "precision": torchmetrics.Precision(task="multiclass", num_classes = self.num_classes, average = metric_average),
+            "recall" : torchmetrics.Recall(task="multiclass", num_classes = self.num_classes, average = metric_average),
             })
         self.loss_metric = torchmetrics.MeanMetric()
         
