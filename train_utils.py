@@ -137,12 +137,13 @@ def get_embeddings(arcface, loader):
             x = data
         else:
             x, y, _ = arcface.unpack_data(data)
+            labels.append(y.cpu().numpy())
+            
         embeddings.append(
             arcface.model.get_embedding(x.to(arcface.device)).detach().cpu().numpy()
         )
-        labels.append(y.cpu().numpy())
     embeddings = np.concatenate(embeddings)
-    labels = np.concatenate(labels)
+    labels = np.concatenate(labels) if labels else np.array([])
 
     return embeddings, labels
 
