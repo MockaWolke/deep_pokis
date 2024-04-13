@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 import pandas as pd
 from PIL import Image
 import io
+from tqdm import tqdm
 
 
 def gen_transforms(level: str):
@@ -62,7 +63,9 @@ def gen_transforms(level: str):
         return transforms.Compose(
             [
                 transforms.ToDtype(torch.float32),
-                transforms.Normalize(mean=(0,) * 3, std=(255,) * 3),  # Common normalization values
+                transforms.Normalize(
+                    mean=(0,) * 3, std=(255,) * 3
+                ),  # Common normalization values
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=30),
                 transforms.RandomResizedCrop(size=224, scale=(0.5, 0.8)),
@@ -70,43 +73,78 @@ def gen_transforms(level: str):
                     degrees=15, translate=(0.2, 0.2), scale=(0.5, 1.5), shear=20
                 ),
                 transforms.RandomPerspective(distortion_scale=0.5, p=0.7),
-                transforms.RandomGrayscale(p=0.2)  # Convert image to grayscale with a probability
+                transforms.RandomGrayscale(
+                    p=0.2
+                ),  # Convert image to grayscale with a probability
             ]
         )
-        
+
     raise ValueError()
-def get_test_df(trainer, wrapper, batchsize, num_workers, crop_mode) -> pd.DataFrame:
-    
-    dataset = PokemonDataset("test", crop_mode=crop_mode, synth_frac=0)
-    loader = DataLoader(dataset, batchsize, num_workers=num_workers)
+
+
+def get_test_df(trainer, wrapper, dataset, loader) -> pd.DataFrame:
     preds = trainer.predict(wrapper, loader)
     ids = np.concatenate([np.argmax(i.detach().cpu().numpy(), -1) for i in preds])
-    
+
     dataset.df["main_type"] = ids.astype(str)
     dataset.df["Id"] = dataset.df.image_id
 
     return dataset.df.copy()
 
 
-# def get_val_umap(trainer, wrapper, batchsize, num_workers, crop_mode) -> Image:
+def plot_umap(embeddings, labels, id2class, title=None) -> Image:
+
+    reducer = umap.UMAP()
+    reducer.fit(embeddings)
+    twodim = reducer.transform(embeddings)
+
+    df = pd.DataFrame({"x": twodim[:, 0], "y": twodim[:, 1], "main_type": labels})
+    df.main_type = df.main_type.map(id2class)
+    fig = plt.figure(figsize=(6, 6))
+    sns.scatterplot(df, x="x", y="y", hue="main_type")
+
+    if title:
+        plt.title(title)
+
+    plt.tight_layout()
+    plt.legend(bbox_to_anchor=(1.05, 1))
+
+    buf = io.BytesIO()
+    fig.savefig(buf)
+    buf.seek(0)
+    return Image.open(buf)
+
+def get_top_10_best(combined_embeddings, test_embeddings, combined_label, test_dataset):
+    combined_embeddings_norm = torch.nn.functional.normalize(torch.tensor(combined_embeddings))
+    test_embeddings_norm =  torch.nn.functional.normalize(torch.tensor(test_embeddings))
     
-#     preds = get_predictions(trainer,wrapper, loader)
-    
-#     reducer = umap.UMAP()
-#     reducer.fit(preds)
-#     embedding = reducer.transform(preds)
-#     df = dataset.df
-#     df["x"] = embedding[:, 0]
-#     df["y"] = embedding[:, 1]
-    
-#     fig = plt.figure(figsize=(6,6))
-#     sns.scatterplot(df, x = "x", y="y", hue="main_type")
-#     plt.title("2d Embeddings")
-#     plt.tight_layout()
-#     buf = io.BytesIO()
-#     fig.savefig(buf)
-#     buf.seek(0)
-#     return Image.open(buf)
+    cos_scores = test_embeddings_norm @ combined_embeddings_norm.T
+    indices = torch.topk(cos_scores, k = 10, axis = 1).indices.cpu().numpy()
+
+    top_10_labels = combined_label[indices]
+    top_10_df = pd.DataFrame({f"top_{i}":top_10_labels[:,i] for i in range(10)})
+    top_10_df["Id"] = test_dataset.df.image_id.values.copy()
+    return top_10_df
+
+
+def get_embeddings(arcface, loader):
+
+    embeddings, labels = [], []
+    arcface.eval()
+    for data in tqdm(loader):
+        if isinstance(x, tuple):
+            x, y, _ = arcface.unpack_data(data)
+        else:
+            x = data
+
+        embeddings.append(
+            arcface.model.get_embedding(x.to(arcface.device)).detach().cpu().numpy()
+        )
+        labels.append(y.cpu().numpy())
+    embeddings = np.concatenate(embeddings)
+    labels = np.concatenate(labels)
+
+    return embeddings, labels
 
 
 def plot_test_preds(df, id2class) -> Image:
