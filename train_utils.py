@@ -132,7 +132,7 @@ def get_embeddings(arcface, loader):
     embeddings, labels = [], []
     arcface.eval()
     for data in tqdm(loader):
-        if isinstance(x, tuple):
+        if isinstance(data, tuple):
             x, y, _ = arcface.unpack_data(data)
         else:
             x = data
