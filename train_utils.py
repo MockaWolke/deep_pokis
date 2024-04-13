@@ -132,11 +132,11 @@ def get_embeddings(arcface, loader):
     embeddings, labels = [], []
     arcface.eval()
     for data in tqdm(loader):
-        if isinstance(data, tuple):
-            x, y, _ = arcface.unpack_data(data)
-        else:
+        
+        if torch.is_tensor(data):
             x = data
-
+        else:
+            x, y, _ = arcface.unpack_data(data)
         embeddings.append(
             arcface.model.get_embedding(x.to(arcface.device)).detach().cpu().numpy()
         )
