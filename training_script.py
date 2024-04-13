@@ -139,7 +139,7 @@ try:
     trainer.test(wrapper, eval_loader)
 
     if hasattr(wrapper, "test_results"):
-        wandb_logger.log_table("clean_val_by_class", dataframe=wrapper.test_results)
+        wandb_logger.log_table("clean_val_by_class", dataframe=wrapper.test_results.reset_index(names="main_type"))
 
 except Exception as e:
     print(f"Error while computing metrics by class: {e}")
@@ -147,7 +147,7 @@ except Exception as e:
 
 try:
 
-    pred_df = get_test_df(trainer, wrapper, batchsize=args.bs, num_workers=args.cores)
+    pred_df = get_test_df(trainer, wrapper, batchsize=args.bs, num_workers=args.cores, crop_mode=args.crop_mode)
 
     stripped = pred_df[["Id", "main_type"]]
 
