@@ -10,7 +10,11 @@ import torch
 import argparse
 from datetime import datetime
 from train_utils import gen_transforms, get_test_df, plot_test_preds
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import (
+    EarlyStopping,
+    ModelCheckpoint,
+    LearningRateMonitor,
+)
 
 parser = argparse.ArgumentParser(
     description="Train a Pokemon classifier using Timm models."
@@ -45,9 +49,8 @@ parser.add_argument(
     default="mild",
 )
 parser.add_argument("--train_synth_frac", type=float, default=1.0)
+parser.add_argument("--precision", type=int, default=32, choices=[32, 16])
 parser.add_argument("--val_synth_frac", type=float, default=1.0)
-
-
 
 
 args = parser.parse_args()
@@ -76,7 +79,6 @@ train_loader = DataLoader(
     train_dataset, batch_size=args.bs, num_workers=args.cores, shuffle=True
 )
 val_loader = DataLoader(val_dataset, batch_size=args.bs, num_workers=args.cores)
-
 
 
 model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
@@ -123,12 +125,19 @@ wrapper = LightningWrapper(
     min_lr=args.min_lr,
 )
 trainer = Trainer(
-    devices="auto", max_epochs=args.epochs, logger=wandb_logger, callbacks=callbacks, fast_dev_run=args.test
+    devices="auto",
+    max_epochs=args.epochs,
+    logger=wandb_logger,
+    callbacks=callbacks,
+    fast_dev_run=args.test,
+    precision=args.precision,
 )
 trainer.fit(wrapper, train_loader, val_loader)
 
 if checkpoint_callback.best_model_path:
-    wrapper = LightningWrapper.load_from_checkpoint(checkpoint_callback.best_model_path, model = model)
+    wrapper = LightningWrapper.load_from_checkpoint(
+        checkpoint_callback.best_model_path, model=model
+    )
 
 
 try:
@@ -139,23 +148,30 @@ try:
     trainer.test(wrapper, eval_loader)
 
     if hasattr(wrapper, "test_results"):
-        wandb_logger.log_table("clean_val_by_class", dataframe=wrapper.test_results.reset_index(names="main_type"))
+        wandb_logger.log_table(
+            "clean_val_by_class",
+            dataframe=wrapper.test_results.reset_index(names="main_type"),
+        )
 
 except Exception as e:
     print(f"Error while computing metrics by class: {e}")
-    
+
 
 try:
 
-    pred_df = get_test_df(trainer, wrapper, batchsize=args.bs, num_workers=args.cores, crop_mode=args.crop_mode)
+    pred_df = get_test_df(
+        trainer,
+        wrapper,
+        batchsize=args.bs,
+        num_workers=args.cores,
+        crop_mode=args.crop_mode,
+    )
 
     stripped = pred_df[["Id", "main_type"]]
 
     wandb_logger.log_table("submission", dataframe=stripped)
 except Exception as e:
     print(f"Test pred prediction: {e}")
-
-
 
 
 try:
@@ -166,3 +182,4 @@ try:
 
 except Exception as e:
     print(f"There was an image loggin error: {e}")
+    print(e)
