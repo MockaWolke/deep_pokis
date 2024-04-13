@@ -100,7 +100,6 @@ def plot_test_preds(df, id2class) -> Image:
     plt.axis("off")
     plt.title(str(row.main_type) + " " + id2class[row.main_type])
     plt.subplot(2, 2, 2)
-    plt.axis("off")
 
     plt.imshow(plt.imread(row.cropped_path))
     plt.axis("off")
@@ -114,7 +113,6 @@ def plot_test_preds(df, id2class) -> Image:
     plt.subplot(2, 2, 4)
     plt.imshow(plt.imread(row.cropped_path))
     plt.axis("off")
-    plt.imshow(plt.imread(row.cropped_path))
 
     plt.tight_layout()
 

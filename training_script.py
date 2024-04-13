@@ -128,7 +128,7 @@ trainer = Trainer(
 trainer.fit(wrapper, train_loader, val_loader)
 
 if checkpoint_callback.best_model_path:
-    wrapper = wrapper.load_from_checkpoint(checkpoint_callback.best_model_path)
+    wrapper = LightningWrapper.load_from_checkpoint(checkpoint_callback.best_model_path)
 
 
 try:
