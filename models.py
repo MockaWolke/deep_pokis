@@ -1,14 +1,12 @@
-from typing import Any
 from lightning import LightningModule
-from data_loading import PokemonDataset, DataDownloader
+from data_loading import DataDownloader
 import pandas as pd
 import torchmetrics
 from torch import nn
 from abc import ABC, abstractmethod
 import torch
 import timm
-from torchmetrics.functional import accuracy, precision, recall, f1_score
-from collections import defaultdict
+from torch.optim.lr_scheduler import LinearLR, SequentialLR, CosineAnnealingLR
 
 
 class ModelTemplate(ABC, nn.Module):
@@ -93,48 +91,39 @@ class TimmModel(ModelTemplate):
         self,
         include_crops,
         num_classes,
-        backbone_name="convnextv2_tiny",
+        backbone_name="mobilenetv3_small_075.lamb_in1k",
         dropout=0.0,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(include_crops, num_classes, *args, **kwargs)
 
-        self.backbone_name = backbone_name
-
         self.backbone = timm.create_model(
             backbone_name,
-            pretrained=True,
+            True,
+            num_classes=0,
             in_chans=6 if include_crops else 3,
-            features_only=True,
-            out_indices=(-1,),
         )
         self.dropout = nn.Dropout(dropout)
+        self.emb_dims = (
+            self.backbone(torch.randn(1, 6 if include_crops else 3, 256, 266))
+            .squeeze()
+            .shape[0]
+        )
+        self.head = nn.Linear(self.emb_dims, num_classes)
 
-        self.emb_dim = self.compute_embedding(
-            torch.zeros(1, 6 if include_crops else 3, 256, 256)
-        ).shape[-1]
-
-        self.norm = nn.LayerNorm(self.emb_dim)
-
-        self.head = nn.Linear(self.emb_dim, num_classes)
-
-    def compute_embedding(self, x):
-
-        x = self.backbone(x)[0]
-        x = x.mean((2, 3))
-        return x
+    def get_embedding(self, x):
+        return self.backbone(x)
 
     def forward(self, x, label=None, label_count=None):
 
-        x = self.compute_embedding(x)
-
-        x = self.norm(self.dropout(x))
+        x = self.backbone(x)
+        x = self.dropout(x)
 
         return self.head(x)
 
+
 def standard_addam_func(wrapper):
-    
 
     wrapper.optim = torch.optim.Adam(wrapper.parameters(), 1e-3)
 
@@ -142,9 +131,19 @@ def standard_addam_func(wrapper):
         "optimizer": wrapper.optim,
     }
 
+
 class LightningWrapper(LightningModule):
 
-    def __init__(self, model, metric_average="micro", optim_setup = standard_addam_func):
+    def __init__(
+        self,
+        model,
+        metric_average="micro",
+        optim_setup=standard_addam_func,
+        cos_anneal=False,
+        warmup_steps=0,
+        min_lr=1e-6,
+        learning_rate=1e-3,
+    ):
         super().__init__()
 
         self.model = model
@@ -196,6 +195,10 @@ class LightningWrapper(LightningModule):
         self.optim_setup = optim_setup
 
         self.id2class = {int(i): v for i, v in DataDownloader.get_id2class().items()}
+        self.cos_anneal = cos_anneal
+        self.warmup_steps = warmup_steps
+        self.min_lr = min_lr
+        self.learning_rate = learning_rate
 
     def forward(self, x, label=None, label_count=None):
 
@@ -241,16 +244,11 @@ class LightningWrapper(LightningModule):
         if len(data) == 2:
             x, y = data
 
-            pred = self.forward(
-                x,
-                y,
-            )
 
         elif len(data) == 3:
             x, y, class_counts = data
-            pred = self.forward(x, y, class_counts)
 
-        pred = self.forward(x)
+        pred = self.forward(x, y)
 
         loss = self.loss_func(pred, y)
 
@@ -283,29 +281,58 @@ class LightningWrapper(LightningModule):
 
         elif len(data) == 3:
             x, y, class_counts = data
-            
+
         pred = self.forward(x)
 
         for metric in self.test_metrics.values():
             metric(pred, y)
+            
 
     def on_test_epoch_end(self) -> None:
         results = {
             name: metric.compute().cpu().numpy()
             for name, metric in self.test_metrics.items()
         }
-        
+
         df = {}
         for metric, values in results.items():
-            
+
             df[metric] = [values[index] for index, cl in self.id2class.items()]
-            
-        self.test_results = pd.DataFrame(df, index=[cl for index, cl in self.id2class.items()])
-            
-        
 
-    def configure_optimizers(self,):
+        self.test_results = pd.DataFrame(
+            df, index=[cl for index, cl in self.id2class.items()]
+        )
+
+    def configure_optimizers(
+        self,
+    ):
+        self.adam = torch.optim.Adam(self.parameters(), self.learning_rate)
+
+        if self.warmup_steps == 0 and not self.cos_anneal:
+            return self.adam
+
+        schedulers = []
+
+        if self.warmup_steps:
+            schedulers.append(LinearLR(self.adam, 1e-7, 1, self.warmup_steps))
+
+        if self.cos_anneal:
+            schedulers.append(
+                CosineAnnealingLR(self.adam, self.trainer.estimated_stepping_batches - self.warmup_steps, eta_min=self.min_lr)
+            )
+
+        if len(schedulers) == 1:
+            scheduler = schedulers[0]
+
+        else:
+            scheduler = SequentialLR(self.adam, schedulers, milestones=[self.warmup_steps])
 
 
-        return self.optim_setup(self)
-
+        return {
+            "optimizer": self.adam,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",  # or 'epoch'
+                "frequency": 1,
+            },
+        }

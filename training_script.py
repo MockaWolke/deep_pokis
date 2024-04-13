@@ -3,19 +3,14 @@ from torch.utils.data import DataLoader
 from data_loading import PokemonDataset
 import os
 from lightning import Trainer
-from datetime import datetime
 import timm
 from lightning.pytorch.loggers import WandbLogger
 from torch import nn
 import torch
 import argparse
 from datetime import datetime
-import numpy as np
-import matplotlib.pyplot as plt
-import io
-from train_utils import gen_transforms, gen_cos_anneal_warmup
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from PIL import Image
+from train_utils import gen_transforms, get_test_df, plot_test_preds
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
 
 parser = argparse.ArgumentParser(
     description="Train a Pokemon classifier using Timm models."
@@ -36,118 +31,55 @@ parser.add_argument(
     type=str,
     default=None,
 )
-parser.add_argument("--cat_model", type=int, default=0)
 parser.add_argument("--n_pred_imgs", type=int, default=10)
 parser.add_argument("--stop_patience", type=int, default=None)
 parser.add_argument("--lr", type=float, default=1e-3)
-parser.add_argument("--use_scheduler", action="store_true")
-parser.add_argument("--warmup_steps", type=int, default=2)
+parser.add_argument("--cos_anneal", action="store_true")
+parser.add_argument("--test", action="store_true")
+parser.add_argument("--warmup_epoch", type=int, default=0)
 parser.add_argument("--min_lr", type=float, default=1e-6)
-
 parser.add_argument(
-    "--transform_strength", type=str, choices=["mild", "medium", "strong"]
+    "--transform_strength",
+    type=str,
+    choices=["mild", "medium", "strong"],
+    default="mild",
 )
+parser.add_argument("--train_synth_frac", type=float, default=1.0)
+parser.add_argument("--val_synth_frac", type=float, default=1.0)
+
+
 
 
 args = parser.parse_args()
 
+
 if args.name is None:
     args.name = f"{args.backbone}_{args.crop_mode}_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
 
+if args.test:
+    args.name = args.name + "_test"
 
 transform_pipeline = gen_transforms(args.transform_strength)
 
 
 train_dataset = PokemonDataset(
-    "train", args.crop_mode, imgsz=args.imgsz, transforms=transform_pipeline
+    "train",
+    args.crop_mode,
+    imgsz=args.imgsz,
+    transforms=transform_pipeline,
+    synth_frac=args.train_synth_frac,
 )
-val_dataset = PokemonDataset("val", args.crop_mode, imgsz=args.imgsz)
+val_dataset = PokemonDataset(
+    "val", args.crop_mode, imgsz=args.imgsz, synth_frac=args.val_synth_frac
+)
 train_loader = DataLoader(
     train_dataset, batch_size=args.bs, num_workers=args.cores, shuffle=True
 )
 val_loader = DataLoader(val_dataset, batch_size=args.bs, num_workers=args.cores)
 
 
-class CatModel(ModelTemplate):
 
-    def __init__(
-        self,
-        include_crops,
-        num_classes,
-        backbone_name="mobilenetv3_small_075.lamb_in1k",
-        dropout=0.0,
-        *args,
-        **kwargs,
-    ) -> None:
-        super().__init__(include_crops, num_classes, *args, **kwargs)
-
-        self.backbone = timm.create_model(
-            backbone_name,
-            True,
-            num_classes=0,
-        )
-
-        self.dropout = nn.Dropout(dropout)
-        self.emb_dims = self.backbone(torch.randn(1, 3, 256, 266)).squeeze().shape[0]
-
-        if self.include_crops:
-            self.emb_dims *= 2
-
-        self.head = nn.Linear(self.emb_dims, num_classes)
-
-    def forward(self, x, label=None, label_count=None):
-
-        if x.shape[1] == 3:
-            x = self.backbone(x)
-        elif x.shape[1] == 6:
-            x1 = self.backbone(x[:, :3])
-            x2 = self.backbone(x[:, 3:])
-            x = torch.cat((x1, x2), -1)
-
-        x = self.dropout(x)
-
-        return self.head(x)
-
-
-class TimmModel(ModelTemplate):
-
-    def __init__(
-        self,
-        include_crops,
-        num_classes,
-        backbone_name="mobilenetv3_small_075.lamb_in1k",
-        dropout=0.0,
-        *args,
-        **kwargs,
-    ) -> None:
-        super().__init__(include_crops, num_classes, *args, **kwargs)
-
-        self.backbone = timm.create_model(
-            backbone_name,
-            True,
-            num_classes=0,
-            in_chans=6 if include_crops else 3,
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.emb_dims = (
-            self.backbone(torch.randn(1, 6 if include_crops else 3, 256, 266))
-            .squeeze()
-            .shape[0]
-        )
-        self.head = nn.Linear(self.emb_dims, num_classes)
-
-    def forward(self, x, label=None, label_count=None):
-
-        x = self.backbone(x)
-        x = self.dropout(x)
-
-        return self.head(x)
-
-
-if args.cat_model:
-    model = CatModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
-else:
-    model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
+model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
 
 
 wandb_logger = WandbLogger(
@@ -158,7 +90,7 @@ wandb_logger = WandbLogger(
     save_code=True,
 )
 
-callbacks = []
+callbacks = [LearningRateMonitor()]
 
 if args.stop_patience:
     callbacks.append(
@@ -180,109 +112,50 @@ checkpoint_callback = ModelCheckpoint(
 callbacks.append(checkpoint_callback)
 
 
-if args.use_scheduler == False:
+warmup_steps = args.warmup_epoch * len(train_loader)
 
-    def optim_setup(wrapper):
-
-        wrapper.optim = torch.optim.Adam(wrapper.parameters(), args.lr)
-
-        return {
-            "optimizer": wrapper.optim,
-        }
-
-else:
-
-    def optim_setup(wrapper):
-
-        wrapper.optim = torch.optim.Adam(wrapper.parameters(), args.lr)
-        wrapper.sheduler = gen_cos_anneal_warmup(
-            wrapper.optim,
-            warmup_steps=args.warmup_steps,
-            anneal_steps=max(args.epochs - args.warmup_steps, 1),
-            min_cos_lr=args.min_lr,
-        )
-
-        return {
-            "optimizer": wrapper.optim,
-        }
-
-
-
-wrapper = LightningWrapper(model, metric_average="micro", optim_setup=optim_setup)
+wrapper = LightningWrapper(
+    model,
+    metric_average="micro",
+    learning_rate=args.lr,
+    cos_anneal=args.cos_anneal,
+    warmup_steps=warmup_steps,
+    min_lr=args.min_lr,
+)
 trainer = Trainer(
-    devices="auto", max_epochs=args.epochs, logger=wandb_logger, callbacks=callbacks
+    devices="auto", max_epochs=args.epochs, logger=wandb_logger, callbacks=callbacks, fast_dev_run=args.test
 )
 trainer.fit(wrapper, train_loader, val_loader)
 
 if checkpoint_callback.best_model_path:
     wrapper = wrapper.load_from_checkpoint(checkpoint_callback.best_model_path)
 
-wrapper.load_from_checkpoint(checkpoint_callback.best_model_path)
 
-eval_val = PokemonDataset("val", args.crop_mode, imgsz=args.imgsz, synth_frac=0)
-eval_loader = DataLoader(eval_val, batch_size=args.bs, num_workers=args.cores)
+try:
 
-trainer.test(wrapper, eval_loader)
+    eval_val = PokemonDataset("val", args.crop_mode, imgsz=args.imgsz, synth_frac=0)
+    eval_loader = DataLoader(eval_val, batch_size=args.bs, num_workers=args.cores)
 
-if hasattr(wrapper, "test_results"):
-    wandb_logger.log_table("clean_val_by_class", dataframe=wrapper.test_results)
+    trainer.test(wrapper, eval_loader)
 
+    if hasattr(wrapper, "test_results"):
+        wandb_logger.log_table("clean_val_by_class", dataframe=wrapper.test_results)
 
-def compute_preds(trainer, wrapper):
-    print("computing preds")
-    test_dataset = PokemonDataset("test", args.crop_mode, imgsz=args.imgsz)
+except Exception as e:
+    print(f"Error while computing metrics by class: {e}")
+    
 
-    test_loader = DataLoader(
-        test_dataset, batch_size=args.bs, num_workers=args.cores, shuffle=False
-    )
+try:
 
-    preds = trainer.predict(wrapper, test_loader)
+    pred_df = get_test_df(trainer, wrapper, batchsize=args.bs, num_workers=args.cores)
 
-    ids = np.concatenate([np.argmax(i.detach().cpu().numpy(), -1) for i in preds])
+    stripped = pred_df[["Id", "main_type"]]
 
-    test_dataset.df["main_type"] = ids.astype(str)
-    test_dataset.df["Id"] = ids
-
-    return test_dataset.df.copy()
+    wandb_logger.log_table("submission", dataframe=stripped)
+except Exception as e:
+    print(f"Test pred prediction: {e}")
 
 
-pred_df = compute_preds(trainer, wrapper)
-
-stripped = pred_df[["Id", "main_type"]]
-
-wandb_logger.log_table("submission", dataframe=stripped)
-
-
-def plot_test_preds(df, id2class) -> Image:
-    fig = plt.figure(figsize=(4, 4))
-    row = df.query("cropp_exists").sample(1).iloc[0]
-    plt.subplot(2, 2, 1)
-    plt.imshow(plt.imread(row.path))
-    plt.axis("off")
-    plt.title(str(row.main_type) + " " + id2class[row.main_type])
-    plt.subplot(2, 2, 2)
-    plt.axis("off")
-
-    plt.imshow(plt.imread(row.cropped_path))
-    plt.axis("off")
-
-    row = df.query("cropp_exists").sample(1).iloc[0]
-    plt.subplot(2, 2, 3)
-    plt.imshow(plt.imread(row.path))
-    plt.axis("off")
-    plt.title(str(row.main_type) + " " + id2class[row.main_type])
-
-    plt.subplot(2, 2, 4)
-    plt.imshow(plt.imread(row.cropped_path))
-    plt.axis("off")
-    plt.imshow(plt.imread(row.cropped_path))
-
-    plt.tight_layout()
-
-    buf = io.BytesIO()
-    fig.savefig(buf)
-    buf.seek(0)
-    return Image.open(buf)
 
 
 try:

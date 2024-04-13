@@ -9,5 +9,7 @@ torch
 torchvision>=0.16
 tqdm
 pytorch-metric-learning
+umap-learn
+seaborn
 lightning
 wandb
