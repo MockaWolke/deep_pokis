@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 import torch
 import timm
 from torch.optim.lr_scheduler import LinearLR, SequentialLR, CosineAnnealingLR
+from pytorch_metric_learning.losses import ArcFaceLoss
 
 
 class ModelTemplate(ABC, nn.Module):
@@ -93,10 +94,13 @@ class TimmModel(ModelTemplate):
         num_classes,
         backbone_name="mobilenetv3_small_075.lamb_in1k",
         dropout=0.0,
+        include_head = True,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(include_crops, num_classes, *args, **kwargs)
+
+        self.include_head = include_head
 
         self.backbone = timm.create_model(
             backbone_name,
@@ -110,7 +114,9 @@ class TimmModel(ModelTemplate):
             .squeeze()
             .shape[0]
         )
-        self.head = nn.Linear(self.emb_dims, num_classes)
+        
+        if self.include_head:
+            self.head = nn.Linear(self.emb_dims, num_classes)
 
     def get_embedding(self, x):
         return self.backbone(x)
@@ -120,16 +126,10 @@ class TimmModel(ModelTemplate):
         x = self.backbone(x)
         x = self.dropout(x)
 
+        if not self.include_head:
+            return x
+        
         return self.head(x)
-
-
-def standard_addam_func(wrapper):
-
-    wrapper.optim = torch.optim.Adam(wrapper.parameters(), 1e-3)
-
-    return {
-        "optimizer": wrapper.optim,
-    }
 
 
 class LightningWrapper(LightningModule):
@@ -138,7 +138,6 @@ class LightningWrapper(LightningModule):
         self,
         model,
         metric_average="micro",
-        optim_setup=standard_addam_func,
         cos_anneal=False,
         warmup_steps=0,
         min_lr=1e-6,
@@ -192,7 +191,6 @@ class LightningWrapper(LightningModule):
                 ),
             }
         )
-        self.optim_setup = optim_setup
 
         self.id2class = {int(i): v for i, v in DataDownloader.get_id2class().items()}
         self.cos_anneal = cos_anneal
@@ -204,21 +202,28 @@ class LightningWrapper(LightningModule):
 
         return self.model(x, label=label, label_count=label_count)
 
+    def get_pred_and_loss(self, x, label=None, label_count=None):
+
+        pred = self.forward(x, label=label, label_count=label_count)
+        loss = self.loss_func(pred, label)
+        
+        return pred, loss
+
+    def unpack_data(self, data):
+        if len(data) == 2:
+            return data[0], data[1], None
+        
+        elif len(data) == 3:
+            return data
+        
+        raise ValueError("3 or 2 data per")
+            
+
     def training_step(self, data, index):
 
-        if len(data) == 2:
-            x, y = data
+        x, y, class_counts = self.unpack_data(data)
 
-            pred = self.forward(
-                x,
-                y,
-            )
-
-        elif len(data) == 3:
-            x, y, class_counts = data
-            pred = self.forward(x, y, class_counts)
-
-        loss = self.loss_func(pred, y)
+        pred, loss = self.get_pred_and_loss(x,y,class_counts)
 
         loss_mean = self.loss_metric(loss)
         self.log(
@@ -240,17 +245,9 @@ class LightningWrapper(LightningModule):
         return loss
 
     def validation_step(self, data, index):
+        x, y, class_counts = self.unpack_data(data)
 
-        if len(data) == 2:
-            x, y = data
-
-
-        elif len(data) == 3:
-            x, y, class_counts = data
-
-        pred = self.forward(x, y)
-
-        loss = self.loss_func(pred, y)
+        pred, loss = self.get_pred_and_loss(x,y,class_counts)
 
         loss_mean = self.loss_metric(loss)
         self.log(
@@ -276,12 +273,7 @@ class LightningWrapper(LightningModule):
 
     def test_step(self, data, index):
 
-        if len(data) == 2:
-            x, y = data
-
-        elif len(data) == 3:
-            x, y, class_counts = data
-
+        x, y, class_counts = self.unpack_data(data)
         pred = self.forward(x)
 
         for metric in self.test_metrics.values():
@@ -336,3 +328,28 @@ class LightningWrapper(LightningModule):
                 "frequency": 1,
             },
         }
+
+class ArcFaceLightning(LightningWrapper):
+    
+    def __init__(self, model, metric_average="micro", cos_anneal=False, warmup_steps=0, min_lr=0.000001, learning_rate=0.001, margin=28.6, scale=4):
+        super().__init__(model, metric_average, cos_anneal, warmup_steps, min_lr, learning_rate)
+        
+        self.scale = scale
+        self.margin = margin
+        
+        self.loss_func = ArcFaceLoss(
+            self.num_classes, self.model.emb_dims, margin=margin, scale=scale
+        )
+        
+    def forward(self, x, label=None, label_count=None):
+        
+        embeddings = self.model(x, label=label, label_count=label_count)
+        return self.loss_func.get_cosine(embeddings)
+
+    def get_pred_and_loss(self, x, label=None, label_count=None):
+        embeddings = self.model(x, label=label, label_count=label_count)
+
+        loss = self.loss_func(embeddings, label)
+        pred = self.loss_func.get_cosine(embeddings)
+        
+        return pred, loss

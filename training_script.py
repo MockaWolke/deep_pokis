@@ -1,4 +1,4 @@
-from models import ModelTemplate, LightningWrapper, TimmModel
+from models import ModelTemplate, LightningWrapper, TimmModel, ArcFaceLightning
 from torch.utils.data import DataLoader
 from data_loading import PokemonDataset
 import os
@@ -53,6 +53,11 @@ parser.add_argument("--precision", type=int, default=32, choices=[32, 16])
 parser.add_argument("--val_synth_frac", type=float, default=1.0)
 parser.add_argument("--job_type", type=str, default=None)
 
+#arcface
+parser.add_argument("--arcface", action="store_true")
+parser.add_argument("--arc_margin", type=float, default=28.6)
+parser.add_argument("--arc_scale", type=float, default=4)
+
 
 args = parser.parse_args()
 
@@ -82,16 +87,16 @@ train_loader = DataLoader(
 val_loader = DataLoader(val_dataset, batch_size=args.bs, num_workers=args.cores)
 
 
-model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
 
 
 wandb_logger = WandbLogger(
     args.name,
     dir="logs",
-    log_model=True,
+    log_model= not args.test,
     config=vars(args),
     save_code=True,
     job_type = args.job_type,
+    offline=args.test,
 )
 
 callbacks = [LearningRateMonitor()]
@@ -118,14 +123,35 @@ callbacks.append(checkpoint_callback)
 
 warmup_steps = args.warmup_epoch * len(train_loader)
 
-wrapper = LightningWrapper(
-    model,
-    metric_average="micro",
-    learning_rate=args.lr,
-    cos_anneal=args.cos_anneal,
-    warmup_steps=warmup_steps,
-    min_lr=args.min_lr,
-)
+
+
+if args.arcface == False:
+
+    model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
+    wrapper = LightningWrapper(
+        model,
+        metric_average="micro",
+        learning_rate=args.lr,
+        cos_anneal=args.cos_anneal,
+        warmup_steps=warmup_steps,
+        min_lr=args.min_lr,
+    )
+    
+else:
+    
+    model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout, include_head=False)
+    wrapper = ArcFaceLightning(
+        model,
+        metric_average="micro",
+        learning_rate=args.lr,
+        cos_anneal=args.cos_anneal,
+        warmup_steps=warmup_steps,
+        min_lr=args.min_lr,
+        margin=args.arc_margin,
+        scale=args.arc_scale,
+    )
+    
+    
 trainer = Trainer(
     devices="auto",
     max_epochs=args.epochs,
