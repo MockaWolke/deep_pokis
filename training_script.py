@@ -215,7 +215,7 @@ clean_test_loader = DataLoader(
 
 
 # special evaluation for metric learning arcface model
-if args.arc_face:
+if args.arcface:
 
     try:
 
