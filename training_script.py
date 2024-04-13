@@ -176,9 +176,18 @@ trainer.fit(wrapper, train_loader, val_loader)
 
 if checkpoint_callback.best_model_path:
 
-    wrapper = LightningWrapper.load_from_checkpoint(
-        checkpoint_callback.best_model_path, model=model
+    wrapper = (
+        LightningWrapper.load_from_checkpoint(
+            checkpoint_callback.best_model_path, model=model
+        )
+        if not args.arc_face
+        else ArcFaceLightning.load_from_checkpoint(
+            checkpoint_callback.best_model_path, model=model
+        )
     )
+    
+    if torch.cuda.is_available():
+        wrapper = wrapper.cuda()
 
 
 # load data with out synthesized images -> clean
