@@ -180,7 +180,7 @@ if checkpoint_callback.best_model_path:
         LightningWrapper.load_from_checkpoint(
             checkpoint_callback.best_model_path, model=model
         )
-        if not args.arc_face
+        if not args.arcface
         else ArcFaceLightning.load_from_checkpoint(
             checkpoint_callback.best_model_path, model=model
         )
