@@ -57,7 +57,24 @@ def gen_transforms(level: str):
             ]
         )
 
+    if level == "extra_strong":
 
+        return transforms.Compose(
+            [
+                transforms.ToDtype(torch.float32),
+                transforms.Normalize(mean=(0,) * 3, std=(255,) * 3),  # Common normalization values
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(degrees=30),
+                transforms.RandomResizedCrop(size=224, scale=(0.5, 0.8)),
+                transforms.RandomAffine(
+                    degrees=15, translate=(0.2, 0.2), scale=(0.5, 1.5), shear=20
+                ),
+                transforms.RandomPerspective(distortion_scale=0.5, p=0.7),
+                transforms.RandomGrayscale(p=0.2)  # Convert image to grayscale with a probability
+            ]
+        )
+        
+    raise ValueError()
 def get_test_df(trainer, wrapper, batchsize, num_workers, crop_mode) -> pd.DataFrame:
     
     dataset = PokemonDataset("test", crop_mode=crop_mode, synth_frac=0)
@@ -66,7 +83,7 @@ def get_test_df(trainer, wrapper, batchsize, num_workers, crop_mode) -> pd.DataF
     ids = np.concatenate([np.argmax(i.detach().cpu().numpy(), -1) for i in preds])
     
     dataset.df["main_type"] = ids.astype(str)
-    dataset.df["Id"] = ids
+    dataset.df["Id"] = dataset.df.image_id
 
     return dataset.df.copy()
 
