@@ -51,6 +51,7 @@ parser.add_argument(
 parser.add_argument("--train_synth_frac", type=float, default=1.0)
 parser.add_argument("--precision", type=int, default=32, choices=[32, 16])
 parser.add_argument("--val_synth_frac", type=float, default=1.0)
+parser.add_argument("--job_type", type=str, default=None)
 
 
 args = parser.parse_args()
@@ -90,6 +91,7 @@ wandb_logger = WandbLogger(
     log_model=True,
     config=vars(args),
     save_code=True,
+    job_type = args.job_type,
 )
 
 callbacks = [LearningRateMonitor()]
