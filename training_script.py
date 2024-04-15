@@ -244,7 +244,7 @@ if args.arcface:
         print(f"Arc Face Eval error", e)
 try:
 
-    trainer.test(wrapper, datamodule.get_val_dataset(without_synth=True))
+    trainer.test(wrapper, datamodule.val_dataloader(without_synth=True))
 
     if hasattr(wrapper, "test_results"):
         wandb_logger.log_table(

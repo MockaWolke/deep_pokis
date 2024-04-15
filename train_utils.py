@@ -130,7 +130,7 @@ def plot_umap(embeddings, labels, id2class, title=None) -> Image:
     plt.legend(bbox_to_anchor=(1.05, 1))
 
     buf = io.BytesIO()
-    fig.savefig(buf)
+    fig.savefig(buf, bbox_inches='tight')
     buf.seek(0)
     return Image.open(buf)
 
