@@ -30,6 +30,8 @@ class RevisedDataset(Dataset):
             "test",
         ]:
             raise ValueError()
+        
+        self.mode = mode
 
         assert crop_mode == "crop"
         self.df: pd.DataFrame = df.copy()

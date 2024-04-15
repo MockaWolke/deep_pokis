@@ -26,7 +26,7 @@ class PokemonDataModule(LightningDataModule):
 
         assert DataDownloader.complete(), "Data is missing"
 
-        self.df = pd.read_csv("dat/info.csv", index_col=0)
+        self.df = pd.read_csv("data/info.csv", index_col=0)
         self.val_og_percentage = val_og_percentage
         self.fill_val_to = fill_val_to
         self.num_workers = num_workers
