@@ -59,7 +59,7 @@ def gen_transforms(level: str, timm_backbone = None):
                 transforms.Normalize(mean=mean, std=std),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=15),
-                transforms.RandomResizedCrop(size=224, scale=(0.4, 0.8)),
+                transforms.RandomResizedCrop(size=224, scale=(0.3, 0.8)),
                 transforms.RandomAffine(
                     degrees=0, translate=(0.05, 0.05), scale=None, shear=5
                 ),
@@ -73,7 +73,7 @@ def gen_transforms(level: str, timm_backbone = None):
                 transforms.Normalize(mean=mean, std=std),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=20),
-                transforms.RandomResizedCrop(size=224, scale=(0.7, 0.9)),
+                transforms.RandomResizedCrop(size=224, scale=(0.2, 0.8)),
                 transforms.RandomAffine(
                     degrees=10, translate=(0.1, 0.1), scale=(0.8, 1.2), shear=10
                 ),
@@ -88,7 +88,7 @@ def gen_transforms(level: str, timm_backbone = None):
                 transforms.Normalize(mean=mean, std=std),  # Common normalization values
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=30),
-                transforms.RandomResizedCrop(size=224, scale=(0.5, 0.8)),
+                transforms.RandomResizedCrop(size=224, scale=(0.2, 0.8)),
                 transforms.RandomAffine(
                     degrees=15, translate=(0.2, 0.2), scale=(0.5, 1.5), shear=20
                 ),
