@@ -13,8 +13,7 @@ from train_utils import (
     plot_umap,
     get_top_10_best,
     get_val_transform,
-    extract_mean_and_std
-    
+    extract_mean_and_std,
 )
 from lightning.pytorch.callbacks import (
     EarlyStopping,
@@ -39,16 +38,13 @@ parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
 # logging args
 parser.add_argument("--job_type", type=str, default=None)
 parser.add_argument("--n_pred_imgs", type=int, default=10)
-parser.add_argument(
-    "--name",
-    type=str,
-    default=None,help="name for logs"
-)
+parser.add_argument("--name", type=str, default=None, help="name for logs")
 
 # training args
 parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
 parser.add_argument("--stop_patience", type=int, default=None)
 parser.add_argument("--lr", type=float, default=1e-3)
+parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--cos_anneal", action="store_true")
 parser.add_argument("--test", action="store_true")
 parser.add_argument("--warmup_epoch", type=int, default=0)
@@ -80,7 +76,6 @@ parser.add_argument("--fill_val_to", type=float, default=0.1)
 parser.add_argument("--pin_memory", action="store_true")
 
 
-
 args = parser.parse_args()
 
 
@@ -97,12 +92,15 @@ model = TimmModel(
     args.backbone,
     dropout=args.dropout,
     include_head=not args.arcface,
+    imgsz=args.imgsz,
 )
 
 
 norm_mean, norm_std = extract_mean_and_std(model.backbone)
 
-transform_pipeline = gen_transforms(args.transform_strength, mean=norm_mean, std=norm_std)
+transform_pipeline = gen_transforms(
+    args.transform_strength, mean=norm_mean, std=norm_std
+)
 val_transform = get_val_transform(mean=norm_mean, std=norm_std)
 
 
@@ -156,28 +154,26 @@ callbacks.append(checkpoint_callback)
 warmup_steps = args.warmup_epoch * len(train_loader)
 
 
+wrapper_kwargs = {
+    "learning_rate": args.lr,
+    "cos_anneal": args.cos_anneal,
+    "warmup_steps": warmup_steps,
+    "min_lr": args.min_lr,
+    "weight_decay": args.weight_decay,
+}
 if args.arcface == False:
 
     Wrapper_class = LightningWrapper
-    wrapper_kwargs = {
-        "learning_rate": args.lr,
-        "cos_anneal": args.cos_anneal,
-        "warmup_steps": warmup_steps,
-        "min_lr": args.min_lr,
-    }
-
 
 else:
     Wrapper_class = ArcFaceLightning
 
-    wrapper_kwargs = {
-        "learning_rate": args.lr,
-        "cos_anneal": args.cos_anneal,
-        "warmup_steps": warmup_steps,
-        "min_lr": args.min_lr,
-        "margin": args.arc_margin,
-        "scale": args.arc_scale,
-    }
+    wrapper_kwargs.update(
+        {
+            "margin": args.arc_margin,
+            "scale": args.arc_scale,
+        }
+    )
 
 
 wrapper = Wrapper_class(model, **wrapper_kwargs)
@@ -203,8 +199,6 @@ if checkpoint_callback.best_model_path:
         wrapper = wrapper.cuda()
 
 
-
-
 test_dataset = datamodule.get_test_dataset()
 test_loader = datamodule.test_dataloader()
 
@@ -213,7 +207,6 @@ test_loader = datamodule.test_dataloader()
 if args.arcface:
 
     try:
-
 
         train_embeddings, train_labels = get_embeddings(wrapper, train_loader)
         val_embeddings, val_labels = get_embeddings(wrapper, val_loader)

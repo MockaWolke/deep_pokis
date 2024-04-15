@@ -94,7 +94,8 @@ class TimmModel(ModelTemplate):
         num_classes,
         backbone_name="mobilenetv3_small_075.lamb_in1k",
         dropout=0.0,
-        include_head = True,
+        include_head=True,
+        imgsz=224,
         *args,
         **kwargs,
     ) -> None:
@@ -110,11 +111,11 @@ class TimmModel(ModelTemplate):
         )
         self.dropout = nn.Dropout(dropout)
         self.emb_dims = (
-            self.backbone(torch.randn(1, 6 if include_crops else 3, 256, 266))
+            self.backbone(torch.randn(1, 6 if include_crops else 3, imgsz, imgsz))
             .squeeze()
             .shape[0]
         )
-        
+
         if self.include_head:
             self.head = nn.Linear(self.emb_dims, num_classes)
 
@@ -128,7 +129,7 @@ class TimmModel(ModelTemplate):
 
         if not self.include_head:
             return x
-        
+
         return self.head(x)
 
 
@@ -142,6 +143,7 @@ class LightningWrapper(LightningModule):
         warmup_steps=0,
         min_lr=1e-6,
         learning_rate=1e-3,
+        weight_decay=0.0,
     ):
         super().__init__()
 
@@ -197,6 +199,7 @@ class LightningWrapper(LightningModule):
         self.warmup_steps = warmup_steps
         self.min_lr = min_lr
         self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
 
     def forward(self, x, label=None, label_count=None):
 
@@ -206,24 +209,23 @@ class LightningWrapper(LightningModule):
 
         pred = self.forward(x, label=label, label_count=label_count)
         loss = self.loss_func(pred, label)
-        
+
         return pred, loss
 
     def unpack_data(self, data):
         if len(data) == 2:
             return data[0], data[1], None
-        
+
         elif len(data) == 3:
             return data
-        
+
         raise ValueError("3 or 2 data per")
-            
 
     def training_step(self, data, index):
 
         x, y, class_counts = self.unpack_data(data)
 
-        pred, loss = self.get_pred_and_loss(x,y,class_counts)
+        pred, loss = self.get_pred_and_loss(x, y, class_counts)
 
         loss_mean = self.loss_metric(loss)
         self.log(
@@ -247,7 +249,7 @@ class LightningWrapper(LightningModule):
     def validation_step(self, data, index):
         x, y, class_counts = self.unpack_data(data)
 
-        pred, loss = self.get_pred_and_loss(x,y,class_counts)
+        pred, loss = self.get_pred_and_loss(x, y, class_counts)
 
         loss_mean = self.loss_metric(loss)
         self.log(
@@ -278,7 +280,6 @@ class LightningWrapper(LightningModule):
 
         for metric in self.test_metrics.values():
             metric(pred, y)
-            
 
     def on_test_epoch_end(self) -> None:
         results = {
@@ -298,7 +299,9 @@ class LightningWrapper(LightningModule):
     def configure_optimizers(
         self,
     ):
-        self.adam = torch.optim.Adam(self.parameters(), self.learning_rate)
+        self.adam = torch.optim.Adam(
+            self.parameters(), self.learning_rate, weight_decay=self.weight_decay
+        )
 
         if self.warmup_steps == 0 and not self.cos_anneal:
             return self.adam
@@ -310,15 +313,20 @@ class LightningWrapper(LightningModule):
 
         if self.cos_anneal:
             schedulers.append(
-                CosineAnnealingLR(self.adam, self.trainer.estimated_stepping_batches - self.warmup_steps, eta_min=self.min_lr)
+                CosineAnnealingLR(
+                    self.adam,
+                    self.trainer.estimated_stepping_batches - self.warmup_steps,
+                    eta_min=self.min_lr,
+                )
             )
 
         if len(schedulers) == 1:
             scheduler = schedulers[0]
 
         else:
-            scheduler = SequentialLR(self.adam, schedulers, milestones=[self.warmup_steps])
-
+            scheduler = SequentialLR(
+                self.adam, schedulers, milestones=[self.warmup_steps]
+            )
 
         return {
             "optimizer": self.adam,
@@ -329,20 +337,40 @@ class LightningWrapper(LightningModule):
             },
         }
 
+
 class ArcFaceLightning(LightningWrapper):
-    
-    def __init__(self, model, metric_average="micro", cos_anneal=False, warmup_steps=0, min_lr=0.000001, learning_rate=0.001, margin=28.6, scale=4):
-        super().__init__(model, metric_average, cos_anneal, warmup_steps, min_lr, learning_rate)
-        
+
+    def __init__(
+        self,
+        model,
+        metric_average="micro",
+        cos_anneal=False,
+        warmup_steps=0,
+        min_lr=0.000001,
+        learning_rate=0.001,
+        weight_decay=0.0,
+        margin=28.6,
+        scale=4,
+    ):
+        super().__init__(
+            model,
+            metric_average,
+            cos_anneal,
+            warmup_steps,
+            min_lr,
+            learning_rate,
+            weight_decay,
+        )
+
         self.scale = scale
         self.margin = margin
-        
+
         self.loss_func = ArcFaceLoss(
             self.num_classes, self.model.emb_dims, margin=margin, scale=scale
         )
-        
+
     def forward(self, x, label=None, label_count=None):
-        
+
         embeddings = self.model(x, label=label, label_count=label_count)
         return self.loss_func.get_cosine(embeddings)
 
@@ -351,5 +379,5 @@ class ArcFaceLightning(LightningWrapper):
 
         loss = self.loss_func(embeddings, label)
         pred = self.loss_func.get_cosine(embeddings)
-        
+
         return pred, loss
