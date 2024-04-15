@@ -62,7 +62,7 @@ parser.add_argument("--arc_scale", type=float, default=4)
 parser.add_argument(
     "--transform_strength",
     type=str,
-    choices=["mild", "medium", "strong", "medium_strong_crop"],
+    choices=["mild", "medium", "strong", "medium_strong_crop", "extra_strong"],
     default="mild",
 )
 
