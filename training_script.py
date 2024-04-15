@@ -12,6 +12,9 @@ from train_utils import (
     get_embeddings,
     plot_umap,
     get_top_10_best,
+    get_val_transform,
+    extract_mean_and_std
+    
 )
 from lightning.pytorch.callbacks import (
     EarlyStopping,
@@ -97,7 +100,10 @@ model = TimmModel(
 )
 
 
-transform_pipeline = gen_transforms(args.transform_strength, model.backbone)
+norm_mean, norm_std = extract_mean_and_std(model.backbone)
+
+transform_pipeline = gen_transforms(args.transform_strength, mean=norm_mean, std=norm_std)
+val_transform = get_val_transform(mean=norm_mean, std=norm_std)
 
 
 datamodule = PokemonDataModule(
@@ -105,6 +111,7 @@ datamodule = PokemonDataModule(
     num_workers=args.cores,
     imgsz=args.imgsz,
     train_transforms=transform_pipeline,
+    val_and_pred_transforms=val_transform,
     fill_val_to=args.fill_val_to,
     pin_memory=args.pin_memory,
     val_og_percentage=args.val_og_percentage,

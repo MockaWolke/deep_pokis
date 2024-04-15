@@ -15,7 +15,8 @@ from tqdm import tqdm
 import timm
 
 
-def gen_transforms(level: str, timm_backbone = None):
+def extract_mean_and_std(timm_backbone):
+
 
     try:
 
@@ -27,6 +28,15 @@ def gen_transforms(level: str, timm_backbone = None):
 
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
+        
+    return mean, std
+
+
+def get_val_transform( mean, std):
+    return transforms.Normalize(mean=mean, std=std)
+
+def gen_transforms(level: str, mean, std):
+    
 
     if level == "mild":
 
