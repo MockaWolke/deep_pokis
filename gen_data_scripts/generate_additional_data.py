@@ -9,18 +9,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from glob import glob
-import hashlib
 from tqdm import tqdm
-from PIL import Image
+from PIL import Image, ImageOps
 from multiprocessing import Pool
 import random
 random.seed(0)
 np.random.seed(0)
 
 
-IMGSZ = 224
-N_TOTAL = 20000
-CORES = 7
+N_TOTAL = 100000
+CORES = 8
 
 df = pd.read_csv("data/parsed_from_index.csv", index_col=0).drop_duplicates("name")
 df.primary.value_counts()
@@ -44,18 +42,16 @@ plt.show()
 samples["y_center"] = np.random.uniform(0.15, 0.85, len(samples))
 samples["x_center"] = np.random.uniform(0.15, 0.85, len(samples))
 
-samples["width"] = np.random.uniform(0.07, 0.20, len(samples))
+samples["width"] = np.random.uniform(0.1, 0.30, len(samples))
 
-samples["upper_corner"] = samples.y_center - samples.width/2
-samples["left_corner"] = samples.x_center - samples.width/2
 
-background_image = glob("data/places_imgs/*/*/*.jpg")
+background_image = glob("data/places_imgs/**/*.jpg", recursive=True)
 samples["background_path"] = np.random.choice(background_image, len(samples))
 
 samples["Id"] = np.arange(len(samples))
-# samples.to_csv("data/generated_imgs.csv")
+# samples.to_csv("data/test_generated_imgs.csv")
+samples = pd.read_csv("data/test_generated_imgs.csv", index_col=0)
 
-samples = pd.read_csv("data/generated_imgs.csv", index_col=0)
 
 
 def turn_tranparent(img):
@@ -71,35 +67,57 @@ def turn_tranparent(img):
     return img
 
 os.makedirs("data/generated", exist_ok=True)
-os.makedirs("data/generated_cropped", exist_ok=True)
+os.makedirs("data/generated_labels", exist_ok=True)
 
 def generate_img(row : pd.Series):
+    labels_path = f"data/generated_labels/{row.Id}.txt"
     save_path = f"data/generated/{row.Id}.jpg"
     
     if os.path.exists(save_path):
         return
     
-    img = Image.open(row.background_path).resize((IMGSZ, IMGSZ)).convert("RGBA")
+    
+    img = Image.open(row.background_path)
+    og_width, _ = img.size
+    new_width = min(og_width, 400) # make to 4/3 format
+    new_height = int(new_width / 4 * 3)
+    
+    img = img.resize((new_width, new_height)).convert("RGBA")
     back_ground = Image.new("RGBA", img.size)
 
     pokemon = Image.open(row.image_path)
+    
+    if np.random.randint(0,2) > 0:
+        pokemon = ImageOps.mirror(pokemon)
     pokemon = turn_tranparent(pokemon)
 
-    resize_y = int(1 / (pokemon.size[0] / IMGSZ / row.width) * pokemon.size[0])
-    resize_x = int(1 / (pokemon.size[1] / IMGSZ / row.width) * pokemon.size[1])
+    resize_x = int(1 / (pokemon.size[0] /  new_width  / row.width) * pokemon.size[0])
+    resize_y = int(1 / (pokemon.size[1] / new_height / row.width) * pokemon.size[1])
 
-    pokemon = pokemon.resize((resize_y, resize_x))
+    pokemon = pokemon.resize((resize_x, resize_y))
+    
+    x_width = resize_x/new_width
+    y_width = resize_y/new_height
 
-    upper_corner = int(row.upper_corner * IMGSZ)
-    left_corner = int(row.left_corner * IMGSZ)
+    upper_corner = int((row.x_center - x_width/2)*new_width)
+    left_corner = int((row.y_center - y_width/2)*new_height)
     back_ground.paste(pokemon, (upper_corner, left_corner), pokemon.split()[3])
     img = Image.alpha_composite(img, back_ground).convert("RGB")
     img.save(save_path)
+    
+    with open(labels_path, "w") as f:
+        f.write(" ".join(list(map(str, [0, row.x_center, row.y_center, x_width, y_width]))))
+
+def wrapper(rows):
+    try:
+        generate_img(rows)
+    except Exception as e:
+        print(e)
 
 rows = [samples.iloc[i] for i in range(len(samples))]
 
 with Pool(CORES) as pool:
-        list(tqdm(pool.imap(generate_img, rows), total=len(rows)))
+        list(tqdm(pool.imap(wrapper, rows), total=len(rows)))
         
 
 

@@ -12,16 +12,27 @@ import pandas as pd
 from PIL import Image
 import io
 from tqdm import tqdm
+import timm
 
 
-def gen_transforms(level: str):
+def gen_transforms(level: str, timm_backbone = None):
+
+    try:
+
+        data_config = timm.data.resolve_model_data_config(timm_backbone)
+        mean, std = data_config["mean"], data_config["std"]
+
+    except:
+        print("Could not extract dataconfig mean and std, falling back on standard")
+
+        mean = (0.485, 0.456, 0.406)
+        std = (0.229, 0.224, 0.225)
 
     if level == "mild":
 
         return transforms.Compose(
             [
-                transforms.ToDtype(torch.float32),
-                transforms.Normalize(mean=(0,) * 3, std=(255,) * 3),
+                transforms.Normalize(mean=mean, std=std),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomVerticalFlip(p=0.5),  # 50% chance of vertical flip
                 transforms.RandomRotation(degrees=10),
@@ -31,8 +42,7 @@ def gen_transforms(level: str):
     if level == "medium":
         return transforms.Compose(
             [
-                transforms.ToDtype(torch.float32),
-                transforms.Normalize(mean=(0,) * 3, std=(255,) * 3),
+                transforms.Normalize(mean=mean, std=std),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=15),
                 transforms.RandomResizedCrop(size=224, scale=(0.85, 0.95)),
@@ -43,11 +53,24 @@ def gen_transforms(level: str):
             ]
         )
 
+    if level == "medium_strong_crop":
+        return transforms.Compose(
+            [
+                transforms.Normalize(mean=mean, std=std),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(degrees=15),
+                transforms.RandomResizedCrop(size=224, scale=(0.4, 0.8)),
+                transforms.RandomAffine(
+                    degrees=0, translate=(0.05, 0.05), scale=None, shear=5
+                ),
+                # Optionally, add more transformations here for "medium" level
+            ]
+        )
+
     if level == "strong":
         return transforms.Compose(
             [
-                transforms.ToDtype(torch.float32),
-                transforms.Normalize(mean=(0,) * 3, std=(255,) * 3),
+                transforms.Normalize(mean=mean, std=std),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=20),
                 transforms.RandomResizedCrop(size=224, scale=(0.7, 0.9)),
@@ -62,10 +85,7 @@ def gen_transforms(level: str):
 
         return transforms.Compose(
             [
-                transforms.ToDtype(torch.float32),
-                transforms.Normalize(
-                    mean=(0,) * 3, std=(255,) * 3
-                ),  # Common normalization values
+                transforms.Normalize(mean=mean, std=std),  # Common normalization values
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=30),
                 transforms.RandomResizedCrop(size=224, scale=(0.5, 0.8)),
@@ -114,15 +134,18 @@ def plot_umap(embeddings, labels, id2class, title=None) -> Image:
     buf.seek(0)
     return Image.open(buf)
 
+
 def get_top_10_best(combined_embeddings, test_embeddings, combined_label, test_dataset):
-    combined_embeddings_norm = torch.nn.functional.normalize(torch.tensor(combined_embeddings))
-    test_embeddings_norm =  torch.nn.functional.normalize(torch.tensor(test_embeddings))
-    
+    combined_embeddings_norm = torch.nn.functional.normalize(
+        torch.tensor(combined_embeddings)
+    )
+    test_embeddings_norm = torch.nn.functional.normalize(torch.tensor(test_embeddings))
+
     cos_scores = test_embeddings_norm @ combined_embeddings_norm.T
-    indices = torch.topk(cos_scores, k = 10, axis = 1).indices.cpu().numpy()
+    indices = torch.topk(cos_scores, k=10, axis=1).indices.cpu().numpy()
 
     top_10_labels = combined_label[indices]
-    top_10_df = pd.DataFrame({f"top_{i}":top_10_labels[:,i] for i in range(10)})
+    top_10_df = pd.DataFrame({f"top_{i}": top_10_labels[:, i] for i in range(10)})
     top_10_df["Id"] = test_dataset.df.image_id.values.copy()
     return top_10_df
 
@@ -132,13 +155,13 @@ def get_embeddings(arcface, loader):
     embeddings, labels = [], []
     arcface.eval()
     for data in tqdm(loader):
-        
+
         if torch.is_tensor(data):
             x = data
         else:
             x, y, _ = arcface.unpack_data(data)
             labels.append(y.cpu().numpy())
-            
+
         embeddings.append(
             arcface.model.get_embedding(x.to(arcface.device)).detach().cpu().numpy()
         )

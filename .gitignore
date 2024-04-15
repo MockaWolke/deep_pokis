@@ -3,6 +3,7 @@ labelImg/
 runs/
 logs/
 lightning_logs
+wandb/
 *.pt
 # Byte-compiled / optimized / DLL files
 __pycache__/

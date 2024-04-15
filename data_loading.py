@@ -11,10 +11,164 @@ import json
 from datadownloader import DataDownloader
 import torchvision.transforms.v2 as T
 
-to_float = T.Compose([
-    T.ToDtype(torch.float32),
-    T.Normalize(mean=(0,)*3, std=(255,)*3)
-])
+standard_norm_transf = T.Normalize(mean=(0.485, 0.456, 0.406), std= (0.229, 0.224, 0.225))
+class RevisedDataset(Dataset):
+
+    def __init__(
+        self,
+        df : pd.DataFrame,
+        mode : str,
+        crop_mode : str,
+        transforms=standard_norm_transf,
+        imgsz=256,
+    ) -> None:
+        super().__init__()
+
+        if mode not in [
+            "train",
+            "val",
+            "test",
+        ]:
+            raise ValueError()
+
+        assert crop_mode == "crop"
+        self.df: pd.DataFrame = df.copy()
+
+        self.resize = torchvision.transforms.Resize((imgsz, imgsz), antialias=True)
+
+        self.num_classes = len(self.df.class_id.dropna().unique())
+        
+        self.transforms = transforms
+
+    def __len__(self):
+
+        return len(self.df)
+
+    def plot_examples(self, n=4):
+
+        fig = plt.figure(figsize=(6, 6))
+
+        for x in range(n):
+            for y in range(n):
+                index = x + 4 * y + 1
+                plt.subplot(n, n, index)
+
+                row = self.df.sample(1).iloc[0]
+
+                plt.imshow(plt.imread(row.path))
+
+                plt.axis("off")
+
+                plt.title(f"{row.main_type} - {int(row.class_id)}")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_examples_crops(self, n=4):
+
+        fig = plt.figure(figsize=(6, 6))
+
+        for x in range(n):
+            for y in range(n):
+                index = x + 4 * y + 1
+                plt.subplot(n, n, index)
+
+                row = self.df.query("cropp_exists").sample(1).iloc[0]
+
+                plt.imshow(plt.imread(row.cropped_path))
+
+                plt.axis("off")
+
+                plt.title(f"{row.main_type} - {int(row.class_id)}")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_examples_both(
+        self,
+    ):
+
+        fig = plt.figure(figsize=(6, 6))
+        row = self.df.query("cropp_exists").sample(1).iloc[0]
+        plt.subplot(2, 2, 1)
+        plt.imshow(plt.imread(row.path))
+        plt.axis("off")
+
+        plt.subplot(2, 2, 2)
+        plt.axis("off")
+        plt.title(f"{row.main_type} - {int(row.class_id)}")
+        plt.imshow(plt.imread(row.cropped_path))
+        plt.axis("off")
+
+        row = self.df.query("cropp_exists").sample(1).iloc[0]
+        plt.subplot(2, 2, 3)
+        plt.imshow(plt.imread(row.path))
+        plt.axis("off")
+
+        plt.subplot(2, 2, 4)
+        plt.imshow(plt.imread(row.cropped_path))
+        plt.axis("off")
+        plt.imshow(plt.imread(row.cropped_path))
+
+        plt.tight_layout()
+        plt.show()
+
+    def __getitem__(self, index) -> tuple[torch.TensorType, int, int]:
+
+        row = self.df.iloc[index]
+
+
+
+
+        img = (
+            self.resize(torchvision.io.read_image(row.cropped_path))
+            if row.cropp_exists
+            else self.resize(torchvision.io.read_image(row.path))
+        )
+        img = self.transforms(img.float() / 255)
+
+        if self.mode == "test":
+            return img
+
+        return img, int(row.class_id), int(row.class_counts)
+
+    def viz_transorms(
+        self,
+        img_index=None,
+        crop=True,
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+    ):
+
+        if img_index is None:
+            img_index = np.random.choice(len(self.df))
+
+        row = self.df.iloc[img_index]
+
+        if crop:
+
+            img = (
+                self.resize(torchvision.io.read_image(row.cropped_path))
+                if row.cropp_exists
+                else self.resize(torchvision.io.read_image(row.path))
+            )
+
+        else:
+
+            img = self.resize(torchvision.io.read_image(row.path))
+
+        imgs = [self.transforms(img.float() / 255) for _ in range(16)]
+
+        fig, axes = plt.subplots(4, 4, figsize=(4, 4))
+        for i, ax in enumerate(axes.flat):
+
+            img = imgs[i].permute(1, 2, 0).numpy()
+            img_normalized = img * np.array(std)[None,None,:] + np.array(mean)[None,None,:]
+            img_normalized = np.clip(img_normalized, 0, 1)
+            ax.imshow(img_normalized)
+            ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+
+
 
 class PokemonDataset(Dataset):
 
@@ -23,7 +177,7 @@ class PokemonDataset(Dataset):
         mode,
         crop_mode: str = "both",
         synth_frac=1.0,
-        transforms= to_float,
+        transforms=standard_norm_transf,
         imgsz=256,
     ) -> None:
         super().__init__()
@@ -143,8 +297,7 @@ class PokemonDataset(Dataset):
         if self.crop_mode == "img":
 
             img = self.resize(torchvision.io.read_image(row.path))
-            img = self.transforms(img)
-
+            img = self.transforms(img.float() / 255)
 
         elif self.crop_mode == "crop":
 
@@ -153,37 +306,40 @@ class PokemonDataset(Dataset):
                 if row.cropp_exists
                 else self.resize(torchvision.io.read_image(row.path))
             )
-            img = self.transforms(img)
-            
+            img = self.transforms(img.float() / 255)
 
         elif self.crop_mode == "both":
 
             img = self.resize(torchvision.io.read_image(row.path))
-            img = self.transforms(img)
-            
+            img = self.transforms(img.float() / 255)
+
             crop = (
                 self.resize(torchvision.io.read_image(row.cropped_path))
                 if row.cropp_exists
                 else torch.zeros_like(img)
             )
-            crop = self.transforms(crop)
-            
+            crop = self.transforms(crop.float() / 255)
 
             img = torch.cat((img, crop), 0)
-
 
         if self.mode == "test":
             return img
 
         return img, int(row.class_id), int(row.class_counts)
 
-    def viz_transorms(self, img_index = None, crop = True):
-        
+    def viz_transorms(
+        self,
+        img_index=None,
+        crop=True,
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+    ):
+
         if img_index is None:
             img_index = np.random.choice(len(self.df))
-            
+
         row = self.df.iloc[img_index]
-        
+
         if crop:
 
             img = (
@@ -191,21 +347,24 @@ class PokemonDataset(Dataset):
                 if row.cropp_exists
                 else self.resize(torchvision.io.read_image(row.path))
             )
-            
+
         else:
 
             img = self.resize(torchvision.io.read_image(row.path))
-        
-        imgs = [self.transforms(img) for _ in range(16)]
-        
+
+        imgs = [self.transforms(img.float() / 255) for _ in range(16)]
+
         fig, axes = plt.subplots(4, 4, figsize=(4, 4))
         for i, ax in enumerate(axes.flat):
-            img = imgs[i].clamp(0, 1).permute(1, 2, 0).numpy() 
-            ax.imshow(img)  
-            ax.axis('off')
+
+            img = imgs[i].permute(1, 2, 0).numpy()
+            img_normalized = img * np.array(std)[None,None,:] + np.array(mean)[None,None,:]
+            img_normalized = np.clip(img_normalized, 0, 1)
+            ax.imshow(img_normalized)
+            ax.axis("off")
         plt.tight_layout()
         plt.show()
-            
+
 
 if __name__ == "__main__":
 

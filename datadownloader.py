@@ -13,13 +13,12 @@ class DataDownloader:
         "test_cropped",
         "test",
         "generated_cropped",
-        "generated",
         "class2id.json",
         "id2class.json",
     ]
 
     prefix = "data"
-    share_path = "https://drive.google.com/file/d/1IGX5we-xkP3mzk7cGkB7LNXaY1kvl3w0/view?usp=sharing"
+    share_path = "https://drive.google.com/file/d/1cO-ffoR1ZZcMlYL4kVKF_YT_LPZUCKCC/view?usp=sharing"
 
     @classmethod
     def get_paths(cls):

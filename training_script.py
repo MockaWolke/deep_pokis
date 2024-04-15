@@ -1,11 +1,7 @@
-from models import ModelTemplate, LightningWrapper, TimmModel, ArcFaceLightning
-from torch.utils.data import DataLoader
-from data_loading import PokemonDataset
+from models import LightningWrapper, TimmModel, ArcFaceLightning
 import os
 from lightning import Trainer
-import timm
 from lightning.pytorch.loggers import WandbLogger
-from torch import nn
 import torch
 import argparse
 from datetime import datetime
@@ -23,48 +19,63 @@ from lightning.pytorch.callbacks import (
     LearningRateMonitor,
 )
 import numpy as np
+from datamodule import PokemonDataModule
 
 parser = argparse.ArgumentParser(
     description="Train a Pokemon classifier using Timm models."
 )
-parser.add_argument(
-    "--cores", type=int, default=os.cpu_count(), help="Number of CPU cores to use"
-)
-parser.add_argument("--imgsz", type=int, default=224, help="Image size")
-parser.add_argument("--crop_mode", type=str, default="crop", help="Cropping mode")
-parser.add_argument("--bs", type=int, default=64, help="Batch size")
+
+
+# model args
 parser.add_argument(
     "--backbone", type=str, default="mobilenetv3_small_050", help="Model backbone"
 )
-parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
 parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
+
+
+# logging args
+parser.add_argument("--job_type", type=str, default=None)
+parser.add_argument("--n_pred_imgs", type=int, default=10)
 parser.add_argument(
     "--name",
     type=str,
-    default=None,
+    default=None,help="name for logs"
 )
-parser.add_argument("--n_pred_imgs", type=int, default=10)
+
+# training args
+parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
 parser.add_argument("--stop_patience", type=int, default=None)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--cos_anneal", action="store_true")
 parser.add_argument("--test", action="store_true")
 parser.add_argument("--warmup_epoch", type=int, default=0)
 parser.add_argument("--min_lr", type=float, default=1e-6)
-parser.add_argument(
-    "--transform_strength",
-    type=str,
-    choices=["mild", "medium", "strong"],
-    default="mild",
-)
-parser.add_argument("--train_synth_frac", type=float, default=1.0)
 parser.add_argument("--precision", type=int, default=32, choices=[32, 16])
-parser.add_argument("--val_synth_frac", type=float, default=1.0)
-parser.add_argument("--job_type", type=str, default=None)
 
 # arcface
 parser.add_argument("--arcface", action="store_true", help="Use ArcFace loss")
 parser.add_argument("--arc_margin", type=float, default=28.6)
 parser.add_argument("--arc_scale", type=float, default=4)
+
+
+# data loading args
+parser.add_argument(
+    "--transform_strength",
+    type=str,
+    choices=["mild", "medium", "strong", "medium_strong_crop"],
+    default="mild",
+)
+
+parser.add_argument(
+    "--cores", type=int, default=os.cpu_count(), help="Number of CPU cores to use"
+)
+parser.add_argument("--imgsz", type=int, default=224, help="Image size")
+parser.add_argument("--crop_mode", type=str, default="crop", help="Cropping mode")
+parser.add_argument("--bs", type=int, default=64, help="Batch size")
+parser.add_argument("--val_og_percentage", type=float, default=1.0)
+parser.add_argument("--fill_val_to", type=float, default=0.1)
+parser.add_argument("--pin_memory", action="store_true")
+
 
 
 args = parser.parse_args()
@@ -76,23 +87,31 @@ if args.name is None:
 if args.test:
     args.name = args.name + "_test"
 
-transform_pipeline = gen_transforms(args.transform_strength)
+
+model = TimmModel(
+    args.crop_mode == "both",
+    18,
+    args.backbone,
+    dropout=args.dropout,
+    include_head=not args.arcface,
+)
 
 
-train_dataset = PokemonDataset(
-    "train",
-    args.crop_mode,
+transform_pipeline = gen_transforms(args.transform_strength, model.backbone)
+
+
+datamodule = PokemonDataModule(
+    batch_size=args.bs,
+    num_workers=args.cores,
     imgsz=args.imgsz,
-    transforms=transform_pipeline,
-    synth_frac=args.train_synth_frac,
+    train_transforms=transform_pipeline,
+    fill_val_to=args.fill_val_to,
+    pin_memory=args.pin_memory,
+    val_og_percentage=args.val_og_percentage,
 )
-val_dataset = PokemonDataset(
-    "val", args.crop_mode, imgsz=args.imgsz, synth_frac=args.val_synth_frac
-)
-train_loader = DataLoader(
-    train_dataset, batch_size=args.bs, num_workers=args.cores, shuffle=True
-)
-val_loader = DataLoader(val_dataset, batch_size=args.bs, num_workers=args.cores)
+
+train_loader = datamodule.train_dataloader()
+val_loader = datamodule.val_dataloader()
 
 
 wandb_logger = WandbLogger(
@@ -132,36 +151,29 @@ warmup_steps = args.warmup_epoch * len(train_loader)
 
 if args.arcface == False:
 
-    model = TimmModel(args.crop_mode == "both", 18, args.backbone, dropout=args.dropout)
-    wrapper = LightningWrapper(
-        model,
-        metric_average="micro",
-        learning_rate=args.lr,
-        cos_anneal=args.cos_anneal,
-        warmup_steps=warmup_steps,
-        min_lr=args.min_lr,
-    )
+    Wrapper_class = LightningWrapper
+    wrapper_kwargs = {
+        "learning_rate": args.lr,
+        "cos_anneal": args.cos_anneal,
+        "warmup_steps": warmup_steps,
+        "min_lr": args.min_lr,
+    }
 
 
 else:
+    Wrapper_class = ArcFaceLightning
 
-    model = TimmModel(
-        args.crop_mode == "both",
-        18,
-        args.backbone,
-        dropout=args.dropout,
-        include_head=False,
-    )
-    wrapper = ArcFaceLightning(
-        model,
-        metric_average="micro",
-        learning_rate=args.lr,
-        cos_anneal=args.cos_anneal,
-        warmup_steps=warmup_steps,
-        min_lr=args.min_lr,
-        margin=args.arc_margin,
-        scale=args.arc_scale,
-    )
+    wrapper_kwargs = {
+        "learning_rate": args.lr,
+        "cos_anneal": args.cos_anneal,
+        "warmup_steps": warmup_steps,
+        "min_lr": args.min_lr,
+        "margin": args.arc_margin,
+        "scale": args.arc_scale,
+    }
+
+
+wrapper = Wrapper_class(model, **wrapper_kwargs)
 
 
 trainer = Trainer(
@@ -176,42 +188,18 @@ trainer.fit(wrapper, train_loader, val_loader)
 
 if checkpoint_callback.best_model_path:
 
-    wrapper = (
-        LightningWrapper.load_from_checkpoint(
-            checkpoint_callback.best_model_path, model=model
-        )
-        if not args.arcface
-        else ArcFaceLightning.load_from_checkpoint(
-            checkpoint_callback.best_model_path, model=model
-        )
+    wrapper = Wrapper_class.load_from_checkpoint(
+        checkpoint_callback.best_model_path, model=model
     )
-    
+
     if torch.cuda.is_available():
         wrapper = wrapper.cuda()
 
 
-# load data with out synthesized images -> clean
 
 
-clean_val_dataset = PokemonDataset(
-    "val",
-    args.crop_mode,
-    imgsz=args.imgsz,
-    synth_frac=0,
-)
-
-
-clean_val_loader = DataLoader(
-    clean_val_dataset, batch_size=args.bs, num_workers=args.cores
-)
-
-clean_test_dataset = PokemonDataset(
-    "test", args.crop_mode, imgsz=args.imgsz, synth_frac=0
-)
-
-clean_test_loader = DataLoader(
-    clean_test_dataset, batch_size=args.bs, num_workers=args.cores
-)
+test_dataset = datamodule.get_test_dataset()
+test_loader = datamodule.test_dataloader()
 
 
 # special evaluation for metric learning arcface model
@@ -219,22 +207,10 @@ if args.arcface:
 
     try:
 
-        clean_train_dataset = PokemonDataset(
-            "train",
-            args.crop_mode,
-            imgsz=args.imgsz,
-            synth_frac=0,
-        )
 
-        clean_train_loader = DataLoader(
-            clean_train_dataset,
-            batch_size=args.bs,
-            num_workers=args.cores,
-            shuffle=True,
-        )
-        train_embeddings, train_labels = get_embeddings(wrapper, clean_train_loader)
-        val_embeddings, val_labels = get_embeddings(wrapper, clean_val_loader)
-        test_embeddings, test_labels = get_embeddings(wrapper, clean_test_loader)
+        train_embeddings, train_labels = get_embeddings(wrapper, train_loader)
+        val_embeddings, val_labels = get_embeddings(wrapper, val_loader)
+        test_embeddings, test_labels = get_embeddings(wrapper, test_loader)
 
         combined_embeddings = np.concatenate((train_embeddings, val_embeddings))
         combined_label = np.concatenate((train_labels, val_labels))
@@ -255,7 +231,7 @@ if args.arcface:
                 combined_embeddings=combined_embeddings,
                 test_embeddings=test_embeddings,
                 combined_label=combined_label,
-                test_dataset=clean_test_dataset,
+                test_dataset=test_dataset,
             )
 
             wandb_logger.log_table("emb_top_10", dataframe=top_10_best)
@@ -268,7 +244,7 @@ if args.arcface:
         print(f"Arc Face Eval error", e)
 try:
 
-    trainer.test(wrapper, clean_val_loader)
+    trainer.test(wrapper, datamodule.get_val_dataset(without_synth=True))
 
     if hasattr(wrapper, "test_results"):
         wandb_logger.log_table(
@@ -288,8 +264,8 @@ try:
     pred_df = get_test_df(
         trainer,
         wrapper,
-        dataset=clean_test_dataset,
-        loader=clean_test_loader,
+        dataset=test_dataset,
+        loader=test_loader,
     )
 
     stripped = pred_df[["Id", "main_type"]]
