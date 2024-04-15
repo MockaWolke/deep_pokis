@@ -45,6 +45,10 @@ parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
 parser.add_argument("--stop_patience", type=int, default=None)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--weight_decay", type=float, default=0.0)
+parser.add_argument("--amsgrad", action="store_true")
+parser.add_argument("--gradient_clip_val", type=float, default=None)
+
+
 parser.add_argument("--cos_anneal", action="store_true")
 parser.add_argument("--test", action="store_true")
 parser.add_argument("--warmup_epoch", type=int, default=0)
@@ -160,7 +164,9 @@ wrapper_kwargs = {
     "warmup_steps": warmup_steps,
     "min_lr": args.min_lr,
     "weight_decay": args.weight_decay,
+    "amsgrad":args.amsgrad,
 }
+
 if args.arcface == False:
 
     Wrapper_class = LightningWrapper
@@ -186,6 +192,7 @@ trainer = Trainer(
     callbacks=callbacks,
     fast_dev_run=args.test,
     precision=args.precision,
+    gradient_clip_val=args.gradient_clip_val,
 )
 trainer.fit(wrapper, train_loader, val_loader)
 

@@ -144,6 +144,7 @@ class LightningWrapper(LightningModule):
         min_lr=1e-6,
         learning_rate=1e-3,
         weight_decay=0.0,
+        amsgrad=False,
     ):
         super().__init__()
 
@@ -200,6 +201,7 @@ class LightningWrapper(LightningModule):
         self.min_lr = min_lr
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.amsgrad = amsgrad
 
     def forward(self, x, label=None, label_count=None):
 
@@ -245,15 +247,14 @@ class LightningWrapper(LightningModule):
             )
 
         return loss
-    
+
     def predict_step(self, data, index):
         if torch.is_tensor(data):
             x = data
         else:
             x, _, _ = self.unpack_data(data)
-            
+
         return self.forward(x)
-            
 
     def validation_step(self, data, index):
         x, y, class_counts = self.unpack_data(data)
@@ -308,8 +309,11 @@ class LightningWrapper(LightningModule):
     def configure_optimizers(
         self,
     ):
-        self.adam = torch.optim.Adam(
-            self.parameters(), self.learning_rate, weight_decay=self.weight_decay
+        self.adam = torch.optim.AdamW(
+            self.parameters(),
+            self.learning_rate,
+            weight_decay=self.weight_decay,
+            amsgrad=self.amsgrad,
         )
 
         if self.warmup_steps == 0 and not self.cos_anneal:
@@ -358,6 +362,7 @@ class ArcFaceLightning(LightningWrapper):
         min_lr=0.000001,
         learning_rate=0.001,
         weight_decay=0.0,
+        amsgrad=False,
         margin=28.6,
         scale=4,
     ):
@@ -369,6 +374,7 @@ class ArcFaceLightning(LightningWrapper):
             min_lr,
             learning_rate,
             weight_decay,
+            amsgrad=amsgrad,
         )
 
         self.scale = scale
