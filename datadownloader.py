@@ -18,7 +18,7 @@ class DataDownloader:
     ]
 
     prefix = "data"
-    share_path = "https://drive.google.com/file/d/1cO-ffoR1ZZcMlYL4kVKF_YT_LPZUCKCC/view?usp=sharing"
+    share_path = "https://drive.google.com/file/d/1Tf3U3MFWY0aIOi7i0s_TjDf1mNPeJp5-/view?usp=sharing"
 
     @classmethod
     def get_paths(cls):
