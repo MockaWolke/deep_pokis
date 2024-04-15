@@ -245,6 +245,15 @@ class LightningWrapper(LightningModule):
             )
 
         return loss
+    
+    def predict_step(self, data, index):
+        if torch.is_tensor(data):
+            x = data
+        else:
+            x, _, _ = self.unpack_data(data)
+            
+        return self.forward(x)
+            
 
     def validation_step(self, data, index):
         x, y, class_counts = self.unpack_data(data)
