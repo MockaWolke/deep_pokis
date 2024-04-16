@@ -59,6 +59,12 @@ parser.add_argument("--precision", type=int, default=32, choices=[32, 16])
 parser.add_argument("--arcface", action="store_true", help="Use ArcFace loss")
 parser.add_argument("--arc_margin", type=float, default=28.6)
 parser.add_argument("--arc_scale", type=float, default=4)
+parser.add_argument(
+    "--class_pow",
+    type=float,
+    default=0,
+    help="power of inverse class counts to serve as weights",
+)
 
 
 # data loading args
@@ -164,7 +170,8 @@ wrapper_kwargs = {
     "warmup_steps": warmup_steps,
     "min_lr": args.min_lr,
     "weight_decay": args.weight_decay,
-    "amsgrad":args.amsgrad,
+    "amsgrad": args.amsgrad,
+    "class_pow": args.class_pow,
 }
 
 if args.arcface == False:
@@ -215,12 +222,12 @@ if args.arcface:
 
     try:
 
-        train_embeddings, train_labels = get_embeddings(wrapper, train_loader)
+        # train_embeddings, train_labels = get_embeddings(wrapper, train_loader)
         val_embeddings, val_labels = get_embeddings(wrapper, val_loader)
         test_embeddings, test_labels = get_embeddings(wrapper, test_loader)
 
-        combined_embeddings = np.concatenate((train_embeddings, val_embeddings))
-        combined_label = np.concatenate((train_labels, val_labels))
+        combined_embeddings = val_embeddings # np.concatenate((train_embeddings, val_embeddings))
+        combined_label = val_labels # np.concatenate((train_labels, val_labels))
 
         try:
             val_umap = plot_umap(

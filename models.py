@@ -8,6 +8,8 @@ import torch
 import timm
 from torch.optim.lr_scheduler import LinearLR, SequentialLR, CosineAnnealingLR
 from pytorch_metric_learning.losses import ArcFaceLoss
+from dynamic_margin_arcface import DynamicMarginArcFaceLoss
+import json
 
 
 class ModelTemplate(ABC, nn.Module):
@@ -145,6 +147,7 @@ class LightningWrapper(LightningModule):
         learning_rate=1e-3,
         weight_decay=0.0,
         amsgrad=False,
+        class_pow=0,
     ):
         super().__init__()
 
@@ -176,7 +179,6 @@ class LightningWrapper(LightningModule):
         )
         self.loss_metric = torchmetrics.MeanMetric()
 
-        self.loss_func = nn.CrossEntropyLoss()
 
         self.test_metrics = nn.ModuleDict(
             {
@@ -202,6 +204,20 @@ class LightningWrapper(LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.amsgrad = amsgrad
+
+        with open(
+            "class_performance.json",
+        ) as f:
+            self.class_weights = torch.Tensor(
+                list(json.load(f).values()),
+            )
+
+        self.class_weights = nn.Parameter(
+            self.class_weights**class_pow, requires_grad=False
+        )
+        
+        self.loss_func = nn.CrossEntropyLoss(weight=self.class_weights)
+        
 
     def forward(self, x, label=None, label_count=None):
 
@@ -363,6 +379,7 @@ class ArcFaceLightning(LightningWrapper):
         learning_rate=0.001,
         weight_decay=0.0,
         amsgrad=False,
+        class_pow=0.0,
         margin=28.6,
         scale=4,
     ):
@@ -375,14 +392,26 @@ class ArcFaceLightning(LightningWrapper):
             learning_rate,
             weight_decay,
             amsgrad=amsgrad,
+            class_pow=class_pow,
         )
 
         self.scale = scale
         self.margin = margin
+        
+        if class_pow == 0.0:
+            
+            self.loss_func = ArcFaceLoss(
+                self.num_classes, self.model.emb_dims, margin=margin, scale=scale, 
+            )
 
-        self.loss_func = ArcFaceLoss(
-            self.num_classes, self.model.emb_dims, margin=margin, scale=scale
-        )
+        else:
+            
+            
+            margins = self.class_weights.detach().cpu().numpy() * self.margin
+            print("\n"*4,"Using these margins:", margins,"\n"*4)
+            self.loss_func = DynamicMarginArcFaceLoss(
+                self.num_classes, self.model.emb_dims, margin=margins, scale=scale, 
+            )
 
     def forward(self, x, label=None, label_count=None):
 
