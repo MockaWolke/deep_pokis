@@ -39,8 +39,11 @@ parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
 parser.add_argument("--job_type", type=str, default=None)
 parser.add_argument("--n_pred_imgs", type=int, default=10)
 parser.add_argument("--name", type=str, default=None, help="name for logs")
+parser.add_argument("--test_time_aug_its", type=int, default=0)
 
 # training args
+    
+
 parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
 parser.add_argument("--stop_patience", type=int, default=None)
 parser.add_argument("--lr", type=float, default=1e-3)
@@ -287,6 +290,36 @@ try:
     wandb_logger.log_table("submission", dataframe=stripped)
 except Exception as e:
     print(f"Test pred prediction", e)
+
+# new block for 
+try:
+
+    if args.test_time_aug_its > 0:
+        
+ 
+        
+
+        aug_test_loader = datamodule.test_dataloader(overwrite_transforms=transform_pipeline)
+        
+    
+
+
+        pred_df = get_test_df(
+            trainer,
+            wrapper,
+            dataset=test_dataset,
+            loader=aug_test_loader,
+            n_iterations=args.test_time_aug_its
+        )
+
+        stripped = pred_df[["Id", "main_type"]]
+
+        wandb_logger.log_table(f"test_time_aug_{args.test_time_aug_its}_submission", dataframe=stripped)
+except Exception as e:
+    print(f"test_time_augmentation failed", e)
+
+
+
 
 
 try:

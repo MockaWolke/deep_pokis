@@ -112,10 +112,24 @@ def gen_transforms(level: str, mean, std):
     raise ValueError()
 
 
-def get_test_df(trainer, wrapper, dataset, loader) -> pd.DataFrame:
-    preds = trainer.predict(wrapper, loader)
-    ids = np.concatenate([np.argmax(i.detach().cpu().numpy(), -1) for i in preds])
-
+def get_test_df(trainer, wrapper, dataset, loader, n_iterations = 1) -> pd.DataFrame:
+    
+    all_preds = []
+    
+    desc = f"Test Time Augmentation with {n_iterations}" if n_iterations != 1 else None
+    
+    for _ in tqdm(range(n_iterations), disable=n_iterations == 1, desc=desc):
+        preds = trainer.predict(wrapper, loader)
+        all_preds.append(np.concatenate([i.detach().cpu().numpy() for i in preds]))
+        
+    if len(all_preds) > 1:
+        all_preds = np.stack(all_preds, -1).mean(axis=-1)
+        
+    else:
+        all_preds = all_preds[0]
+        
+    ids = np.argmax(all_preds, -1)
+    
     dataset.df["main_type"] = ids.astype(str)
     dataset.df["Id"] = dataset.df.image_id
 
