@@ -1,0 +1,4 @@
+Link to github: https://github.com/MockaWolke/deep_pokis/blob/main/training_script.py%5D(https://github.com/MockaWolke/deep_pokis/blob/main/training_script.py
+
+our used arguments were:
+"training_script.py --bs 128 --backbone tf_efficientnetv2_s.in21k_ft_in1k --epochs 20 --imgsz 224 --n_pred_imgs 10 --transform_strength strong --precision 16 --weight_decay 0.01 --dropout 0.2 --cos_anneal --warmup_epoch 1 --min_lr 0.00001 --pin_memory"
